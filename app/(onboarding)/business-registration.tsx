@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { StyleSheet, ScrollView, TextInput, Alert } from "react-native";
-import { router, useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams, Redirect } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
-import { collection, doc, setDoc } from "firebase/firestore";
+import { collection, doc, setDoc, getDoc } from "firebase/firestore";
 import { db } from "@/firebaseConfig";
+import { SafeAreaView } from "react-native";
+import { CustomHeader } from "@/components/CustomHeader";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import { Colors } from "../../constants/Colors";
+import Colors from "@/constants/Colors";
 
 export default function BusinessRegistration() {
   const { user } = useUser();
   const { userId, getToken } = useAuth();
   const params = useLocalSearchParams();
+  const [isLoading, setIsLoading] = useState(true);
   const [formData, setFormData] = useState({
     businessName: "",
     ownerFullName: "",
@@ -22,6 +25,27 @@ export default function BusinessRegistration() {
     businessLicense: "",
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Check if business is already registered
+  useEffect(() => {
+    const checkBusinessRegistration = async () => {
+      if (!userId) return;
+
+      try {
+        const businessDoc = await getDoc(doc(db, "businesses", userId));
+        if (businessDoc.exists()) {
+          // Business already registered, redirect to main app
+          router.replace("/(tabs)");
+        }
+      } catch (error) {
+        console.error("Error checking business registration:", error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    checkBusinessRegistration();
+  }, [userId]);
 
   // Auto-populate email from params or Clerk
   useEffect(() => {
@@ -34,6 +58,19 @@ export default function BusinessRegistration() {
       }));
     }
   }, [params.email]);
+
+  // Prevent unauthorized access
+  if (!userId) {
+    return <Redirect href="/(auth)/sign-in" />;
+  }
+
+  if (isLoading) {
+    return (
+      <ThemedView style={styles.loadingContainer}>
+        <ThemedText>Loading...</ThemedText>
+      </ThemedView>
+    );
+  }
 
   const handleSubmit = async () => {
     if (!userId) {
@@ -72,7 +109,7 @@ export default function BusinessRegistration() {
           text: "OK",
           onPress: () => {
             // Navigate to main app
-            router.replace("/(home)");
+            router.replace("/(tabs)");
           },
         },
       ]);
@@ -88,7 +125,7 @@ export default function BusinessRegistration() {
   };
 
   return (
-    <ThemedView style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}
@@ -108,7 +145,7 @@ export default function BusinessRegistration() {
                 setFormData({ ...formData, businessName: text })
               }
               placeholder="Enter business name"
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -121,7 +158,7 @@ export default function BusinessRegistration() {
                 setFormData({ ...formData, ownerFullName: text })
               }
               placeholder="Enter owner's full name"
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -132,7 +169,7 @@ export default function BusinessRegistration() {
               value={formData.email}
               editable={false}
               placeholder="Email from your account"
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -144,7 +181,7 @@ export default function BusinessRegistration() {
               onChangeText={(text) => setFormData({ ...formData, phone: text })}
               placeholder="Enter phone number"
               keyboardType="phone-pad"
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -159,7 +196,7 @@ export default function BusinessRegistration() {
               placeholder="Enter business address"
               multiline
               numberOfLines={3}
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -174,7 +211,7 @@ export default function BusinessRegistration() {
                 setFormData({ ...formData, businessLicense: text })
               }
               placeholder="Enter business license number"
-              placeholderTextColor={Colors.light.icon}
+              placeholderTextColor={Colors.light.textSecondary}
             />
           </ThemedView>
 
@@ -191,46 +228,58 @@ export default function BusinessRegistration() {
           </ThemedView>
         </ThemedView>
       </ScrollView>
-    </ThemedView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    backgroundColor: "#FFFFFF",
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
   },
   scrollView: {
     flex: 1,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 24,
     fontWeight: "bold",
-    marginBottom: 8,
-    color: Colors.light.tint,
+    margin: 8,
+    color: Colors.light.text,
+    marginTop: 20,
   },
   subtitle: {
     fontSize: 16,
-    marginBottom: 24,
-    color: Colors.light.icon,
+    marginBottom: 32,
+    color: Colors.light.textSecondary,
   },
   form: {
-    gap: 16,
+    gap: 20,
+    paddingBottom: 40,
   },
   inputContainer: {
     gap: 8,
   },
   label: {
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
+    color: Colors.light.text,
   },
   input: {
     height: 48,
     borderWidth: 1,
-    borderColor: Colors.light.icon,
-    borderRadius: 8,
+    borderColor: Colors.light.border,
+    borderRadius: 12,
     paddingHorizontal: 16,
     fontSize: 16,
+    backgroundColor: "#FFFFFF",
+    color: Colors.light.text,
   },
   multilineInput: {
     height: 100,
@@ -238,18 +287,26 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   submitButton: {
-    backgroundColor: Colors.light.tint,
-    height: 48,
-    borderRadius: 8,
+    backgroundColor: Colors.light.primary,
+    height: 52,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 24,
+    marginTop: 32,
+    shadowColor: Colors.light.primary,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   submitButtonDisabled: {
     opacity: 0.7,
   },
   submitButtonText: {
-    color: "#fff",
+    color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "600",
   },

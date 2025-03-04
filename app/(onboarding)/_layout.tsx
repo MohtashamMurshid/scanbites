@@ -9,23 +9,28 @@ export default function OnboardingLayout() {
 
   return (
     <>
-      <StatusBar style={isDark ? "light" : "dark"} />
       <Stack
         screenOptions={{
           headerShown: false,
           animation: "fade",
           contentStyle: {
-            backgroundColor: "transparent",
+            backgroundColor: "#FFFFFF",
           },
+          header: () => null,
         }}
       >
-        <Stack.Screen name="index" />
+        <Stack.Screen
+          name="index"
+          options={{
+            headerShown: false,
+            header: () => null,
+          }}
+        />
         <Stack.Screen
           name="business-registration"
           options={{
-            headerShown: true,
-            headerTitle: "Business Registration",
-            presentation: "modal",
+            headerShown: false,
+            header: () => null,
           }}
         />
       </Stack>
