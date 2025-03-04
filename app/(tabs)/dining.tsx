@@ -1,13 +1,67 @@
-import { StyleSheet, ScrollView, View, TextInput } from "react-native";
+import {
+  StyleSheet,
+  ScrollView,
+  View,
+  TextInput,
+  TouchableOpacity,
+} from "react-native";
 import { Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import Colors from "@/constants/Colors";
+import { useState } from "react";
+
+type Customer = {
+  id: string;
+  name: string;
+  tableNumber: string;
+  time: string;
+  status: "dining" | "completed";
+  items: string[];
+};
+
+const MOCK_CUSTOMERS: Customer[] = [
+  {
+    id: "1",
+    name: "John Smith",
+    tableNumber: "T1",
+    time: "12:30 PM",
+    status: "dining",
+    items: ["Burger Special", "Coke"],
+  },
+  {
+    id: "2",
+    name: "Sarah Johnson",
+    tableNumber: "T4",
+    time: "1:15 PM",
+    status: "dining",
+    items: ["Chicken Wings", "Fries", "Sprite"],
+  },
+  {
+    id: "3",
+    name: "Mike Brown",
+    tableNumber: "T2",
+    time: "12:00 PM",
+    status: "completed",
+    items: ["Pizza", "Salad", "Water"],
+  },
+];
 
 export default function DiningScreen() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<"dining" | "completed">("dining");
+
+  const filteredCustomers = MOCK_CUSTOMERS.filter(
+    (customer) =>
+      customer.status === activeTab &&
+      (customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        customer.tableNumber.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Dining</Text>
+        <Text style={styles.headerTitle}>Dining Customers</Text>
       </View>
 
       <View style={styles.searchContainer}>
@@ -15,40 +69,92 @@ export default function DiningScreen() {
           <Ionicons
             name="search"
             size={20}
-            color="#666"
+            color={Colors.light.textSecondary}
             style={styles.searchIcon}
           />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search restaurants or dishes"
-            placeholderTextColor="#999"
+            placeholder="Search by name or table number"
+            placeholderTextColor={Colors.light.textSecondary}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
           />
         </View>
+      </View>
+
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "dining" && styles.activeTab]}
+          onPress={() => setActiveTab("dining")}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === "dining" && styles.activeTabText,
+            ]}
+          >
+            Currently Dining
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === "completed" && styles.activeTab]}
+          onPress={() => setActiveTab("completed")}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              activeTab === "completed" && styles.activeTabText,
+            ]}
+          >
+            Completed
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
       >
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Nearby Restaurants</Text>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>No restaurants found</Text>
-            <Text style={styles.cardDescription}>
-              Enable location services to find restaurants near you
-            </Text>
+        {filteredCustomers.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Ionicons
+              name="restaurant-outline"
+              size={48}
+              color={Colors.light.textSecondary}
+            />
+            <Text style={styles.emptyStateText}>No customers found</Text>
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Popular Dishes</Text>
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>No popular dishes</Text>
-            <Text style={styles.cardDescription}>
-              Popular dishes in your area will appear here
-            </Text>
-          </View>
-        </View>
+        ) : (
+          filteredCustomers.map((customer) => (
+            <View key={customer.id} style={styles.customerCard}>
+              <View style={styles.customerHeader}>
+                <View style={styles.customerInfo}>
+                  <Text style={styles.customerName}>{customer.name}</Text>
+                  <View style={styles.tableContainer}>
+                    <Ionicons
+                      name="restaurant"
+                      size={14}
+                      color={Colors.light.textSecondary}
+                    />
+                    <Text style={styles.tableNumber}>
+                      Table {customer.tableNumber}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.timeText}>{customer.time}</Text>
+              </View>
+              <View style={styles.divider} />
+              <View style={styles.itemsContainer}>
+                <Text style={styles.itemsTitle}>Items Ordered:</Text>
+                {customer.items.map((item, index) => (
+                  <Text key={index} style={styles.itemText}>
+                    • {item}
+                  </Text>
+                ))}
+              </View>
+            </View>
+          ))
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -57,29 +163,29 @@ export default function DiningScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8f9fa",
+    backgroundColor: Colors.light.surface,
   },
   header: {
     padding: 16,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.background,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: Colors.light.border,
   },
   headerTitle: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "#2f95dc",
+    color: Colors.light.primary,
   },
   searchContainer: {
     padding: 16,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.background,
     borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    borderBottomColor: Colors.light.border,
   },
   searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#f2f2f2",
+    backgroundColor: Colors.light.surface,
     borderRadius: 8,
     padding: 10,
   },
@@ -89,7 +195,31 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: "#333",
+    color: Colors.light.text,
+  },
+  tabContainer: {
+    flexDirection: "row",
+    backgroundColor: Colors.light.background,
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.border,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: "center",
+    borderRadius: 8,
+  },
+  activeTab: {
+    backgroundColor: Colors.light.primary,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: Colors.light.textSecondary,
+  },
+  activeTabText: {
+    color: Colors.light.background,
   },
   scrollView: {
     flex: 1,
@@ -97,20 +227,22 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
   },
-  section: {
-    marginBottom: 24,
+  emptyState: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 48,
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 12,
-    color: "#333",
+  emptyStateText: {
+    fontSize: 16,
+    color: Colors.light.textSecondary,
+    marginTop: 16,
   },
-  card: {
-    backgroundColor: "#fff",
+  customerCard: {
+    backgroundColor: Colors.light.background,
     borderRadius: 12,
     padding: 16,
-    shadowColor: "#000",
+    marginBottom: 16,
+    shadowColor: Colors.light.text,
     shadowOffset: {
       width: 0,
       height: 2,
@@ -119,15 +251,51 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
-  cardTitle: {
+  customerHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  customerInfo: {
+    flex: 1,
+  },
+  customerName: {
     fontSize: 16,
     fontWeight: "600",
-    marginBottom: 8,
-    color: "#333",
+    color: Colors.light.text,
+    marginBottom: 4,
   },
-  cardDescription: {
+  tableContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  tableNumber: {
     fontSize: 14,
-    color: "#666",
-    lineHeight: 20,
+    color: Colors.light.textSecondary,
+    marginLeft: 4,
+  },
+  timeText: {
+    fontSize: 14,
+    color: Colors.light.primary,
+    fontWeight: "500",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.light.border,
+    marginVertical: 12,
+  },
+  itemsContainer: {
+    marginTop: 4,
+  },
+  itemsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginBottom: 8,
+  },
+  itemText: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    marginBottom: 4,
   },
 });

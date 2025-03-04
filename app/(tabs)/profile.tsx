@@ -110,27 +110,12 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Dietary Preferences</Text>
-          <View style={styles.card}>
-            <View style={styles.preferenceItem}>
-              <Ionicons name="leaf" size={24} color={Colors.light.primary} />
-              <Text style={styles.preferenceText}>Vegetarian</Text>
-            </View>
-            <View style={styles.preferenceItem}>
-              <Ionicons name="warning" size={24} color={Colors.light.primary} />
-              <Text style={styles.preferenceText}>Nut Allergy</Text>
-            </View>
-            <TouchableOpacity style={styles.addButton}>
-              <Ionicons name="add" size={20} color={Colors.light.primary} />
-              <Text style={styles.addButtonText}>Add Preference</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.card}>
-            <TouchableOpacity style={styles.menuItem}>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => router.push("/profile")}
+            >
               <Ionicons
                 name="business"
                 size={24}
