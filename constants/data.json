@@ -1,0 +1,218 @@
+{
+  "questions": [
+    {
+      "id": 1,
+      "question": "Do you have any food allergies?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 2,
+      "question": "If yes, which food allergens affect you?",
+      "options": [
+        "Peanuts",
+        "Tree nuts",
+        "Dairy",
+        "Eggs",
+        "Shellfish",
+        "Wheat",
+        "Soy",
+        "Others"
+      ],
+      "type": "multiple_choice",
+      "dependency": 1
+    },
+    {
+      "id": 3,
+      "question": "Do you have any dietary restrictions?",
+      "options": [
+        "Vegetarian",
+        "Vegan",
+        "Gluten-Free",
+        "Keto",
+        "Halal",
+        "Kosher",
+        "Lactose-Free",
+        "Pescatarian",
+        "None"
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "id": 4,
+      "question": "Do you have any chronic digestive conditions?",
+      "options": [
+        "Irritable Bowel Syndrome (IBS)",
+        "Celiac Disease",
+        "Crohn's Disease",
+        "Ulcerative Colitis",
+        "Acid Reflux (GERD)",
+        "None"
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "id": 5,
+      "question": "Have you ever experienced food poisoning?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 6,
+      "question": "Do you have a history of diabetes?",
+      "options": ["Type 1", "Type 2", "Pre-diabetic", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 7,
+      "question": "Do you have high blood pressure (hypertension)?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 8,
+      "question": "Are you currently taking any medications that affect your diet?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 9,
+      "question": "If yes, please specify the medication type or name.",
+      "options": [],
+      "type": "text",
+      "dependency": 8
+    },
+    {
+      "id": 10,
+      "question": "Do you have any known metabolic disorders?",
+      "options": [
+        "Hypothyroidism",
+        "Hyperthyroidism",
+        "Metabolic Syndrome",
+        "None"
+      ],
+      "type": "multiple_choice"
+    },
+    {
+      "id": 11,
+      "question": "Do you experience frequent bloating or stomach pain after meals?",
+      "options": ["Often", "Sometimes", "Rarely", "Never"],
+      "type": "single_choice"
+    },
+    {
+      "id": 12,
+      "question": "Have you ever undergone a medical procedure related to your digestive system?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 13,
+      "question": "Do you monitor your daily calorie or nutrient intake?",
+      "options": ["Yes, regularly", "Sometimes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 14,
+      "question": "On average, how many calories do you consume daily?",
+      "options": [
+        "Less than 1500",
+        "1500-2000",
+        "2000-2500",
+        "2500-3000",
+        "More than 3000",
+        "I don't track"
+      ],
+      "type": "single_choice"
+    },
+    {
+      "id": 15,
+      "question": "How much salt do you consume in your diet?",
+      "options": [
+        "I consume a lot of salty foods",
+        "I use moderate salt",
+        "I try to limit salt",
+        "I avoid salt as much as possible"
+      ],
+      "type": "single_choice"
+    },
+    {
+      "id": 16,
+      "question": "How much sugar do you consume daily?",
+      "options": [
+        "A lot (More than 50g)",
+        "Moderate (25-50g)",
+        "Low (Less than 25g)",
+        "I avoid sugar"
+      ],
+      "type": "single_choice"
+    },
+    {
+      "id": 17,
+      "question": "How often do you consume processed or fast food?",
+      "options": [
+        "Daily",
+        "A few times a week",
+        "Once a week",
+        "Rarely",
+        "Never"
+      ],
+      "type": "single_choice"
+    },
+    {
+      "id": 18,
+      "question": "How often do you exercise?",
+      "options": [
+        "Daily",
+        "3-5 times a week",
+        "1-2 times a week",
+        "Rarely",
+        "Never"
+      ],
+      "type": "single_choice"
+    },
+    {
+      "id": 19,
+      "question": "How would you describe your lifestyle?",
+      "options": ["Active", "Moderately active", "Sedentary"],
+      "type": "single_choice"
+    },
+    {
+      "id": 20,
+      "question": "Do you smoke or consume alcohol?",
+      "options": ["I smoke", "I consume alcohol", "Both", "Neither"],
+      "type": "multiple_choice"
+    },
+    {
+      "id": 21,
+      "question": "How many meals do you eat per day on average?",
+      "options": ["1 meal", "2 meals", "3 meals", "More than 3 meals"],
+      "type": "single_choice"
+    },
+    {
+      "id": 22,
+      "question": "Do you take any dietary supplements?",
+      "options": ["Yes", "No"],
+      "type": "single_choice"
+    },
+    {
+      "id": 23,
+      "question": "If yes, which supplements do you take?",
+      "options": [
+        "Multivitamins",
+        "Protein",
+        "Omega-3",
+        "Vitamin D",
+        "Iron",
+        "Others"
+      ],
+      "type": "multiple_choice",
+      "dependency": 22
+    },
+    {
+      "id": 24,
+      "question": "How often do you drink water per day?",
+      "options": ["Less than 1L", "1-2L", "2-3L", "More than 3L"],
+      "type": "single_choice"
+    }
+  ]
+}

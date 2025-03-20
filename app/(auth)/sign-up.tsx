@@ -51,7 +51,7 @@ export default function SignUpScreen() {
 
       if (signUpAttempt.status === "complete") {
         await setActive({ session: signUpAttempt.createdSessionId });
-        router.replace("/(onboarding)/business-registration");
+        router.replace("/(onboarding)/health-questionnaire");
       } else {
         Alert.alert(
           "Verification Failed",

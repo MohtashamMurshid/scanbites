@@ -10,44 +10,75 @@ import {
 import { Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import { router } from "expo-router";
 import Colors from "@/constants/Colors";
 import { useEffect, useState } from "react";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/firebaseConfig";
 
-type BusinessData = {
-  businessName: string;
-  email: string;
-  ownerFullName: string;
-  physicalAddress: string;
+type UserPreferences = {
+  dietaryPreferences: Record<number, string | string[]>;
+  completedAt: string;
 };
 
 export default function ProfileScreen() {
   const { signOut, userId } = useAuth();
-  const [businessData, setBusinessData] = useState<BusinessData | null>(null);
+  const { user } = useUser();
+  const [userPreferences, setUserPreferences] =
+    useState<UserPreferences | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState<string>("");
 
   useEffect(() => {
-    const fetchBusinessData = async () => {
+    const fetchUserData = async () => {
       if (!userId) return;
 
       try {
-        const businessDoc = await getDoc(doc(db, "businesses", userId));
-        if (businessDoc.exists()) {
-          setBusinessData(businessDoc.data() as BusinessData);
+        const userDoc = await getDoc(doc(db, "userPreferences", userId));
+        if (userDoc.exists()) {
+          setUserPreferences(userDoc.data() as UserPreferences);
+        }
+
+        // Get user email from Clerk
+        if (user?.primaryEmailAddress) {
+          setUserEmail(user.primaryEmailAddress.emailAddress);
         }
       } catch (error) {
-        console.error("Error fetching business data:", error);
-        Alert.alert("Error", "Failed to load business information");
+        console.error("Error fetching user preferences:", error);
+        Alert.alert("Error", "Failed to load your nutrition preferences");
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchBusinessData();
-  }, [userId]);
+    fetchUserData();
+  }, [userId, user]);
+
+  // Helper function to extract allergies
+  const getAllergies = (): string[] => {
+    if (!userPreferences?.dietaryPreferences) return [];
+
+    // Question 1 is "Do you have any food allergies?"
+    // Question 2 is "If yes, which food allergens affect you?"
+    const hasAllergies = userPreferences.dietaryPreferences[1] === "Yes";
+    if (!hasAllergies) return [];
+
+    return Array.isArray(userPreferences.dietaryPreferences[2])
+      ? userPreferences.dietaryPreferences[2]
+      : [];
+  };
+
+  // Helper function to extract dietary restrictions
+  const getDietaryRestrictions = (): string[] => {
+    if (!userPreferences?.dietaryPreferences) return [];
+
+    // Question 3 is "Do you have any dietary restrictions?"
+    const restrictions = userPreferences.dietaryPreferences[3];
+    return Array.isArray(restrictions)
+      ? restrictions.filter((r) => r !== "None")
+      : [];
+  };
 
   if (isLoading) {
     return (
@@ -58,6 +89,9 @@ export default function ProfileScreen() {
       </SafeAreaView>
     );
   }
+
+  const allergies = getAllergies();
+  const dietaryRestrictions = getDietaryRestrictions();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -79,49 +113,86 @@ export default function ProfileScreen() {
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {businessData?.businessName?.charAt(0) || "B"}
-              </Text>
+              <Ionicons name="person" size={40} color="#fff" />
             </View>
           </View>
-          <Text style={styles.profileName}>
-            {businessData?.businessName || "Business Name"}
-          </Text>
-          <Text style={styles.profileEmail}>
-            {businessData?.email || "email@example.com"}
-          </Text>
-          <Text style={styles.ownerName}>
-            Owner: {businessData?.ownerFullName || "Owner Name"}
-          </Text>
-          <View style={styles.addressContainer}>
-            <Ionicons
-              name="location"
-              size={16}
-              color={Colors.light.textSecondary}
-            />
-            <Text style={styles.addressText}>
-              {businessData?.physicalAddress || "No address provided"}
-            </Text>
-          </View>
+          <Text style={styles.profileName}>My Nutrition Profile</Text>
+          {userEmail ? (
+            <View style={styles.emailContainer}>
+              <Ionicons
+                name="mail-outline"
+                size={16}
+                color={Colors.light.textSecondary}
+              />
+              <Text style={styles.emailText}>{userEmail}</Text>
+            </View>
+          ) : null}
 
-          <TouchableOpacity style={styles.editProfileButton}>
+          <TouchableOpacity
+            style={styles.editProfileButton}
+            onPress={() => router.push("/(modals)/edit-profile")}
+          >
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Nutrition Preferences</Text>
+          <View style={styles.card}>
+            <View style={styles.preferenceItem}>
+              <View style={styles.preferenceIcon}>
+                <Ionicons name="warning" size={18} color="#FF9500" />
+              </View>
+              <View style={styles.preferenceContent}>
+                <Text style={styles.preferenceTitle}>Food Allergies</Text>
+                {allergies.length > 0 ? (
+                  <View style={styles.tagContainer}>
+                    {allergies.map((allergy, index) => (
+                      <View key={index} style={styles.tag}>
+                        <Text style={styles.tagText}>{allergy}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.noDataText}>No allergies reported</Text>
+                )}
+              </View>
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.preferenceItem}>
+              <View style={styles.preferenceIcon}>
+                <Ionicons name="restaurant" size={18} color="#4CD964" />
+              </View>
+              <View style={styles.preferenceContent}>
+                <Text style={styles.preferenceTitle}>Dietary Restrictions</Text>
+                {dietaryRestrictions.length > 0 ? (
+                  <View style={styles.tagContainer}>
+                    {dietaryRestrictions.map((restriction, index) => (
+                      <View key={index} style={styles.tag}>
+                        <Text style={styles.tagText}>{restriction}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.noDataText}>No dietary restrictions</Text>
+                )}
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Account</Text>
           <View style={styles.card}>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => router.push("/profile")}
-            >
+            <TouchableOpacity style={styles.menuItem}>
               <Ionicons
-                name="business"
+                name="nutrition"
                 size={24}
                 color={Colors.light.primary}
               />
-              <Text style={styles.menuItemText}>Business Information</Text>
+              <Text style={styles.menuItemText}>Nutrition History</Text>
               <Ionicons
                 name="chevron-forward"
                 size={20}
@@ -219,26 +290,21 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  avatarText: {
-    fontSize: 36,
-    fontWeight: "bold",
-    color: "#fff",
-  },
   profileName: {
     fontSize: 24,
     fontWeight: "bold",
     color: "#333",
-    marginBottom: 4,
-  },
-  profileEmail: {
-    fontSize: 16,
-    color: "#666",
     marginBottom: 8,
   },
-  ownerName: {
-    fontSize: 16,
-    color: "#666",
+  emailContainer: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 16,
+  },
+  emailText: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    marginLeft: 6,
   },
   editProfileButton: {
     paddingVertical: 8,
@@ -276,24 +342,54 @@ const styles = StyleSheet.create({
   },
   preferenceItem: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 8,
+    alignItems: "flex-start",
+    paddingVertical: 12,
   },
-  preferenceText: {
+  preferenceIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  preferenceContent: {
+    flex: 1,
+  },
+  preferenceTitle: {
     fontSize: 16,
+    fontWeight: "600",
     color: "#333",
-    marginLeft: 12,
+    marginBottom: 8,
   },
-  addButton: {
+  tagContainer: {
     flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-    paddingVertical: 8,
+    flexWrap: "wrap",
+    marginTop: 4,
   },
-  addButtonText: {
+  tag: {
+    backgroundColor: Colors.light.primary + "15",
+    borderRadius: 16,
+    paddingVertical: 5,
+    paddingHorizontal: 10,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  tagText: {
     color: Colors.light.primary,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  noDataText: {
+    color: Colors.light.textSecondary,
     fontSize: 14,
-    marginLeft: 8,
+    fontStyle: "italic",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#eee",
+    marginVertical: 12,
   },
   menuItem: {
     flexDirection: "row",
@@ -317,18 +413,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#ff3b30",
     marginLeft: 12,
-  },
-  addressContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-    paddingHorizontal: 20,
-  },
-  addressText: {
-    fontSize: 14,
-    color: Colors.light.textSecondary,
-    marginLeft: 8,
-    flex: 1,
-    textAlign: "center",
   },
 });

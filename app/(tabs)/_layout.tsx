@@ -34,11 +34,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="dining"
+        name="nutrition"
         options={{
-          title: "Dining",
+          title: "Nutrition",
           tabBarIcon: ({ color }) => (
-            <TabBarIcon name="restaurant" color={color} />
+            <TabBarIcon name="nutrition" color={color} />
           ),
         }}
       />
