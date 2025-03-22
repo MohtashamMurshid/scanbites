@@ -27,7 +27,7 @@ export default function OnboardingLayout() {
           }}
         />
         <Stack.Screen
-          name="business-registration"
+          name="health-questionnaire"
           options={{
             headerShown: false,
             header: () => null,

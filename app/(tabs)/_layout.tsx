@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { Pressable, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import Colors from "@/constants/Colors";
@@ -34,11 +34,11 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="dining"
+        name="nutrition"
         options={{
-          title: "Dining",
+          title: "Nutrition",
           tabBarIcon: ({ color }) => (
-            <TabBarIcon name="restaurant" color={color} />
+            <TabBarIcon name="nutrition" color={color} />
           ),
         }}
       />

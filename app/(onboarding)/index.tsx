@@ -12,6 +12,7 @@ import {
   SafeAreaView,
   Platform,
   StatusBar,
+  Image,
 } from "react-native";
 import { Redirect, router } from "expo-router";
 import { LinearGradient } from "expo-linear-gradient";
@@ -30,6 +31,7 @@ type OnboardingItem = {
   id: string;
   title: string;
   description: string;
+  image: any;
 };
 
 const onboardingData: OnboardingItem[] = [
@@ -37,25 +39,22 @@ const onboardingData: OnboardingItem[] = [
     id: "1",
     title: "Welcome to ScanBites",
     description:
-      "Your smart companion for discovering and managing food information.",
+      "Your AI-powered food scanner for personalized nutrition guidance.",
+    image: require("@/assets/images/onboarding-01.png"),
   },
   {
     id: "2",
-    title: "Food Scanning",
+    title: "Scan Any Food",
     description:
-      "Use your camera to scan food. AI detects items, ingredients, and allergens. Know what's on your plate in seconds.",
+      "Point your camera at any food item and get instant nutritional information powered by AI.",
+    image: require("@/assets/images/onboarding-02..png"),
   },
   {
     id: "3",
-    title: "Dietary Tracking",
+    title: "Personalized Guidance",
     description:
-      "Log your meals with each scan. Monitor calories and nutrients. Get health alerts and better meal suggestions.",
-  },
-  {
-    id: "4",
-    title: "Restaurant Search",
-    description:
-      "Find restaurants with ScanBites. Check menus with nutrition info. Choose meals that fit your health goals.",
+      "Receive nutrition recommendations tailored to your dietary needs and health goals.",
+    image: require("@/assets/images/onboarding-03.png"),
   },
 ];
 
@@ -117,6 +116,7 @@ export default function OnboardingScreen() {
             },
           ]}
         >
+          <Image source={item.image} style={styles.image} />
           <ThemedText style={styles.title}>{item.title}</ThemedText>
           <ThemedText style={styles.description}>{item.description}</ThemedText>
         </Animated.View>
@@ -319,5 +319,11 @@ const styles = StyleSheet.create({
     color: Colors.light.background,
     fontSize: 16,
     fontWeight: "600",
+  },
+  image: {
+    width: width * 0.7,
+    height: width * 0.7,
+    marginBottom: 30,
+    resizeMode: "contain",
   },
 });
