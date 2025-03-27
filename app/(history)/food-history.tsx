@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import {
   StyleSheet,
   Text,
@@ -10,48 +10,17 @@ import {
   FlatList,
   TextInput,
   Alert,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/Colors";
 import { Stack, router } from "expo-router";
-import {
-  collection,
-  query,
-  where,
-  orderBy,
-  getDocs,
-  Timestamp,
-  deleteDoc,
-  doc,
-  writeBatch,
-} from "firebase/firestore";
-import { db } from "@/firebaseConfig";
 import { useAuth } from "@clerk/clerk-expo";
-
-type FoodScan = {
-  id: string;
-  foodName: string;
-  calories: string;
-  caloriesNum: number;
-  protein: string;
-  proteinNum: number;
-  carbs: string;
-  carbsNum: number;
-  fat: string;
-  fatNum: number;
-  imageUrl: string;
-  timestamp: Timestamp;
-  scanDate: string;
-  allergens?: string[];
-};
+import { useRecentScans, useDeleteScans, FoodScan } from "@/hooks/useQueries";
 
 export default function FoodHistoryScreen() {
   const { userId } = useAuth();
-  const [foodScans, setFoodScans] = useState<FoodScan[]>([]);
-  const [filteredScans, setFilteredScans] = useState<FoodScan[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFilter, setSelectedFilter] = useState("all");
   const [dateRange, setDateRange] = useState("all");
@@ -60,57 +29,53 @@ export default function FoodHistoryScreen() {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
 
-  const fetchScans = async () => {
-    if (!userId) return;
+  // Use TanStack Query hooks
+  const { data: foodScans = [], isLoading, error } = useRecentScans();
+  const deleteMutation = useDeleteScans();
 
-    try {
-      setLoading(true);
-      setError(null);
+  // Filter scans based on search query and filters
+  const filteredScans = React.useMemo(() => {
+    if (!foodScans) return [];
+    let filtered = [...foodScans];
 
-      // Query Firestore for all food scans by this user
-      const scansRef = collection(db, "nutritionData");
-      const q = query(
-        scansRef,
-        where("userId", "==", userId),
-        orderBy("timestamp", "desc")
+    // Apply search filter
+    if (searchQuery) {
+      filtered = filtered.filter((scan) =>
+        scan.foodName.toLowerCase().includes(searchQuery.toLowerCase())
       );
-
-      const querySnapshot = await getDocs(q);
-      const scanData: FoodScan[] = [];
-
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        scanData.push({
-          id: doc.id,
-          foodName: data.foodName || "Unknown Food",
-          calories: data.calories || "0 kcal",
-          caloriesNum: data.caloriesNum || 0,
-          protein: data.protein || "0g",
-          proteinNum: data.proteinNum || 0,
-          carbs: data.carbs || "0g",
-          carbsNum: data.carbsNum || 0,
-          fat: data.fat || "0g",
-          fatNum: data.fatNum || 0,
-          imageUrl: data.imageUrl || "",
-          timestamp: data.timestamp,
-          scanDate: data.scanDate || "",
-          allergens: data.allergens || [],
-        });
-      });
-
-      setFoodScans(scanData);
-      setFilteredScans(scanData);
-    } catch (err) {
-      console.error("Error fetching food scans:", err);
-      setError("Failed to load your food history. Please try again.");
-    } finally {
-      setLoading(false);
     }
-  };
 
-  useEffect(() => {
-    fetchScans();
-  }, [userId]);
+    // Apply nutrition filter
+    if (selectedFilter === "high-protein") {
+      filtered = filtered.filter((scan) => scan.proteinNum >= 20);
+    } else if (selectedFilter === "low-carb") {
+      filtered = filtered.filter((scan) => scan.carbsNum <= 15);
+    } else if (selectedFilter === "low-calorie") {
+      filtered = filtered.filter((scan) => scan.caloriesNum <= 300);
+    }
+
+    // Apply date filter
+    if (dateRange === "today") {
+      const today = new Date().toISOString().split("T")[0];
+      filtered = filtered.filter((scan) => scan.scanDate === today);
+    } else if (dateRange === "week") {
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      filtered = filtered.filter((scan) => {
+        if (!scan.timestamp) return false;
+        return scan.timestamp.toDate() >= weekAgo;
+      });
+    } else if (dateRange === "month") {
+      const monthAgo = new Date();
+      monthAgo.setMonth(monthAgo.getMonth() - 1);
+      filtered = filtered.filter((scan) => {
+        if (!scan.timestamp) return false;
+        return scan.timestamp.toDate() >= monthAgo;
+      });
+    }
+
+    return filtered;
+  }, [foodScans, searchQuery, selectedFilter, dateRange]);
 
   // Toggle selection mode
   const toggleSelectionMode = () => {
@@ -155,80 +120,22 @@ export default function FoodHistoryScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              setLoading(true);
-              const batch = writeBatch(db);
-
-              selectedItems.forEach((id) => {
-                const docRef = doc(db, "nutritionData", id);
-                batch.delete(docRef);
-              });
-
-              await batch.commit();
-
-              // Reset selection and refresh data
+              await deleteMutation.mutateAsync(Array.from(selectedItems));
               setSelectionMode(false);
               setSelectedItems(new Set());
-              fetchScans();
-
               Alert.alert(
                 "Success",
                 `Deleted ${selectedItems.size} items successfully.`
               );
             } catch (err) {
               console.error("Error deleting items:", err);
-              setError("Failed to delete items. Please try again.");
-              setLoading(false);
+              Alert.alert("Error", "Failed to delete items. Please try again.");
             }
           },
         },
       ]
     );
   };
-
-  // Apply filters when search query, selected filter, or date range changes
-  useEffect(() => {
-    if (!foodScans.length) return;
-
-    let filtered = [...foodScans];
-
-    // Apply search filter
-    if (searchQuery) {
-      filtered = filtered.filter((scan) =>
-        scan.foodName.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    // Apply nutrition filter
-    if (selectedFilter === "high-protein") {
-      filtered = filtered.filter((scan) => scan.proteinNum >= 20);
-    } else if (selectedFilter === "low-carb") {
-      filtered = filtered.filter((scan) => scan.carbsNum <= 15);
-    } else if (selectedFilter === "low-calorie") {
-      filtered = filtered.filter((scan) => scan.caloriesNum <= 300);
-    }
-
-    // Apply date filter
-    if (dateRange === "today") {
-      const today = new Date().toISOString().split("T")[0];
-      filtered = filtered.filter((scan) => scan.scanDate === today);
-    } else if (dateRange === "week") {
-      const weekAgo = new Date();
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      filtered = filtered.filter((scan) => {
-        if (!scan.timestamp) return false;
-        return scan.timestamp.toDate() >= weekAgo;
-      });
-    } else if (dateRange === "month") {
-      const monthAgo = new Date();
-      monthAgo.setMonth(monthAgo.getMonth() - 1);
-      filtered = filtered.filter((scan) => {
-        if (!scan.timestamp) return false;
-        return scan.timestamp.toDate() >= monthAgo;
-      });
-    }
-
-    setFilteredScans(filtered);
-  }, [foodScans, searchQuery, selectedFilter, dateRange]);
 
   const renderFoodScan = ({ item }: { item: FoodScan }) => {
     const isSelected = selectedItems.has(item.id);
@@ -301,27 +208,19 @@ export default function FoodHistoryScreen() {
         <View style={styles.nutritionGrid}>
           <View style={styles.nutritionItem}>
             <Text style={styles.nutritionLabel}>Calories</Text>
-            <Text style={styles.nutritionValue}>
-              {item.caloriesNum ? `${item.caloriesNum} kcal` : item.calories}
-            </Text>
+            <Text style={styles.nutritionValue}>{item.calories}</Text>
           </View>
           <View style={styles.nutritionItem}>
             <Text style={styles.nutritionLabel}>Protein</Text>
-            <Text style={styles.nutritionValue}>
-              {item.proteinNum ? `${item.proteinNum}g` : item.protein}
-            </Text>
+            <Text style={styles.nutritionValue}>{item.protein}</Text>
           </View>
           <View style={styles.nutritionItem}>
             <Text style={styles.nutritionLabel}>Carbs</Text>
-            <Text style={styles.nutritionValue}>
-              {item.carbsNum ? `${item.carbsNum}g` : item.carbs}
-            </Text>
+            <Text style={styles.nutritionValue}>{item.carbs}</Text>
           </View>
           <View style={styles.nutritionItem}>
             <Text style={styles.nutritionLabel}>Fat</Text>
-            <Text style={styles.nutritionValue}>
-              {item.fatNum ? `${item.fatNum}g` : item.fat}
-            </Text>
+            <Text style={styles.nutritionValue}>{item.fat}</Text>
           </View>
         </View>
 
@@ -370,7 +269,7 @@ export default function FoodHistoryScreen() {
     </TouchableOpacity>
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
         <Stack.Screen options={{ title: "" }} />
@@ -392,7 +291,9 @@ export default function FoodHistoryScreen() {
             size={48}
             color={Colors.light.error}
           />
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>
+            Failed to load your food history. Please try again.
+          </Text>
           <TouchableOpacity
             style={styles.retryButton}
             onPress={() => router.replace("/(history)/food-history")}
@@ -409,10 +310,25 @@ export default function FoodHistoryScreen() {
       <Stack.Screen
         options={{
           title: "",
-          headerTitleStyle: {
-            fontSize: 18,
-            fontWeight: "600",
+          headerStyle: {
+            backgroundColor: "white",
           },
+          headerShadowVisible: false,
+          headerLeft:
+            Platform.OS === "ios"
+              ? () => (
+                  <TouchableOpacity
+                    style={{ marginLeft: 8 }}
+                    onPress={() => router.back()}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={24}
+                      color={Colors.light.primary}
+                    />
+                  </TouchableOpacity>
+                )
+              : undefined,
           headerRight: () => (
             <View style={styles.headerButtons}>
               {selectionMode ? (
@@ -626,6 +542,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#f5f5f5",
+    paddingTop: Platform.OS === "ios" ? 0 : 16,
   },
   loadingContainer: {
     flex: 1,
@@ -662,7 +579,7 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: Platform.OS === "ios" ? 8 : 16,
     paddingBottom: 8,
     backgroundColor: "white",
   },

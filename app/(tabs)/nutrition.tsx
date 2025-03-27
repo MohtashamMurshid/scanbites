@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import {
   StyleSheet,
   View,
@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Dimensions,
+  ActivityIndicator,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/Colors";
 import Svg, { Circle } from "react-native-svg";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { router } from "expo-router";
+import { useRecentScans, useConsumedScans } from "@/hooks/useQueries";
+import * as Location from "expo-location";
 
 type Article = {
   id: string;
@@ -22,157 +26,523 @@ type Article = {
   image: any;
 };
 
-export default function NutritionScreen() {
-  const { user } = useUser();
+type Restaurant = {
+  id: string;
+  name: string;
+  cuisine: string;
+  rating: number;
+  distance: string;
+  image?: string;
+  vicinity: string;
+  place_id: string;
+};
 
-  // Mock data for the progress indicators
-  const caloriesProgress = 0.35; // 35% progress
-  const allergiesProgress = 0.7; // 70% progress
-  const healthWarningsProgress = 0.2; // 20% progress
+type MealSuggestion = {
+  id: string;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  image?: string;
+  tags: string[];
+};
 
-  // Mock data for the articles
-  const articles: Article[] = [
-    {
-      id: "1",
-      title: "Benefits of Eating Whole Foods",
-      description:
-        "Eating whole foods provides essential nutrients for overall health.",
-      image: require("../../assets/images/onboarding-01.png"),
-    },
-    {
-      id: "2",
-      title: "Healthy Snack Options",
-      description: "Opt for fruits, nuts, or yogurt for guilt-free snacking.",
-      image: require("../../assets/images/onboarding-02..png"),
-    },
-    {
-      id: "3",
-      title: "Benefits of Eating Whole Foods",
-      description:
-        "Eating whole foods provides essential nutrients for overall health.",
-      image: require("../../assets/images/onboarding-03.png"),
-    },
-    {
-      id: "4",
-      title: "Healthy Snack Options",
-      description: "Opt for fruits, nuts, or yogurt for guilt-free snacking.",
-      image: require("../../assets/images/onboarding-01.png"),
-    },
-  ];
+const CircleProgress = ({
+  size,
+  strokeWidth,
+  progress,
+  label,
+  value,
+}: {
+  size: number;
+  strokeWidth: number;
+  progress: number;
+  label: string;
+  value: string | number;
+}) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const progressOffset = circumference - (progress / 100) * circumference;
 
-  // Circle Progress component
-  const CircleProgress = ({
-    progress,
-    color,
-    title,
-    size = 80,
-    strokeWidth = 8,
-  }: {
-    progress: number;
-    color: string;
-    title: string;
-    size?: number;
-    strokeWidth?: number;
-  }) => {
-    const radius = (size - strokeWidth) / 2;
-    const circumference = radius * 2 * Math.PI;
-    const strokeDashoffset = circumference * (1 - progress);
-
-    return (
-      <View style={styles.progressContainer}>
-        <Svg width={size} height={size}>
-          {/* Background Circle */}
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke="#E0E0E0"
-            strokeWidth={strokeWidth}
-            fill="transparent"
-          />
-          {/* Progress Circle */}
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={color}
-            strokeWidth={strokeWidth}
-            fill="transparent"
-            strokeDasharray={`${circumference} ${circumference}`}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            transform={`rotate(-90, ${size / 2}, ${size / 2})`}
-          />
-        </Svg>
-        <Text style={styles.progressTitle}>{title}</Text>
+  return (
+    <View style={styles.progressContainer}>
+      <Svg width={size} height={size}>
+        <Circle
+          stroke="#E8E8E8"
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+        />
+        <Circle
+          stroke={Colors.light.primary}
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={progressOffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <View style={styles.progressContent}>
+        <Text style={styles.progressValue}>{value}</Text>
+        <Text style={styles.progressLabel}>{label}</Text>
       </View>
+    </View>
+  );
+};
+
+export default function NutritionScreen() {
+  const { userId } = useAuth();
+  const { user } = useUser();
+  const [nearbyRestaurants, setNearbyRestaurants] = useState<Restaurant[]>([]);
+  const [mealSuggestions, setMealSuggestions] = useState<MealSuggestion[]>([]);
+  const [location, setLocation] = useState<Location.LocationObject | null>(
+    null
+  );
+  const [dailyTargets] = useState({
+    calories: 2500,
+    protein: 100,
+    carbs: 300,
+    fat: 80,
+  });
+
+  // Use TanStack Query hooks
+  const { data: recentScans = [], isLoading: isLoadingRecent } =
+    useRecentScans(5);
+  const { data: consumedScans = [], isLoading: isLoadingConsumed } =
+    useConsumedScans();
+
+  // Calculate nutrition stats with more detailed metrics
+  const nutritionStats = React.useMemo(() => {
+    if (!consumedScans.length) {
+      return {
+        totalCalories: 0,
+        averageCalories: 0,
+        todayCalories: 0,
+        todayProtein: 0,
+        todayCarbs: 0,
+        todayFat: 0,
+        scansCount: 0,
+      };
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const todayScans = consumedScans.filter((scan) => {
+      const scanDate =
+        scan.scanDate ||
+        new Date(scan.timestamp.toDate()).toISOString().split("T")[0];
+      return scanDate === today;
+    });
+
+    const totalCals = consumedScans.reduce(
+      (sum, scan) => sum + (scan.caloriesNum || 0),
+      0
     );
-  };
+    const todayStats = todayScans.reduce(
+      (stats, scan) => ({
+        calories: stats.calories + (scan.caloriesNum || 0),
+        protein: stats.protein + (scan.proteinNum || 0),
+        carbs: stats.carbs + (scan.carbsNum || 0),
+        fat: stats.fat + (scan.fatNum || 0),
+      }),
+      { calories: 0, protein: 0, carbs: 0, fat: 0 }
+    );
+
+    return {
+      totalCalories: totalCals,
+      averageCalories: Math.round(totalCals / consumedScans.length),
+      todayCalories: todayStats.calories,
+      todayProtein: todayStats.protein,
+      todayCarbs: todayStats.carbs,
+      todayFat: todayStats.fat,
+      scansCount: consumedScans.length,
+    };
+  }, [consumedScans]);
+
+  // Get user's location and fetch nearby restaurants
+  useEffect(() => {
+    (async () => {
+      try {
+        let { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          Alert.alert(
+            "Permission Denied",
+            "Please enable location services to find nearby restaurants."
+          );
+          return;
+        }
+
+        let location = await Location.getCurrentPositionAsync({});
+        setLocation(location);
+
+        // Replace 'YOUR_API_KEY' with your actual Google Places API key
+        const apiKey = process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY;
+        const radius = 1500; // Search within 1.5km
+        const type = "restaurant";
+        const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${location.coords.latitude},${location.coords.longitude}&radius=${radius}&type=${type}&key=${apiKey}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === "OK") {
+          const restaurants: Restaurant[] = data.results.map((place: any) => ({
+            id: place.place_id,
+            name: place.name,
+            cuisine: place.types[0].replace("_", " "),
+            rating: place.rating || 0,
+            distance: `${(
+              getDistance(
+                {
+                  latitude: location.coords.latitude,
+                  longitude: location.coords.longitude,
+                },
+                {
+                  latitude: place.geometry.location.lat,
+                  longitude: place.geometry.location.lng,
+                }
+              ) / 1000
+            ).toFixed(1)} km`,
+            image: place.photos
+              ? `https://maps.googleapis.com/maps/api/place/photo?maxwidth=400&photoreference=${place.photos[0].photo_reference}&key=${apiKey}`
+              : undefined,
+            vicinity: place.vicinity,
+            place_id: place.place_id,
+          }));
+
+          setNearbyRestaurants(restaurants);
+        } else {
+          console.error("Failed to fetch restaurants:", data.status);
+          Alert.alert("Error", "Failed to fetch nearby restaurants");
+        }
+      } catch (error) {
+        console.error("Error fetching restaurants:", error);
+        Alert.alert("Error", "Failed to fetch nearby restaurants");
+      }
+    })();
+  }, []);
+
+  // Helper function to calculate distance between two coordinates
+  function getDistance(
+    coords1: { latitude: number; longitude: number },
+    coords2: { latitude: number; longitude: number }
+  ): number {
+    const R = 6371e3; // Earth's radius in meters
+    const φ1 = (coords1.latitude * Math.PI) / 180;
+    const φ2 = (coords2.latitude * Math.PI) / 180;
+    const Δφ = ((coords2.latitude - coords1.latitude) * Math.PI) / 180;
+    const Δλ = ((coords2.longitude - coords1.longitude) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c; // Distance in meters
+  }
+
+  // Generate meal suggestions based on remaining daily targets
+  useEffect(() => {
+    if (consumedScans.length > 0) {
+      const remainingCalories =
+        dailyTargets.calories - nutritionStats.todayCalories;
+      const remainingProtein =
+        dailyTargets.protein - nutritionStats.todayProtein;
+
+      // Update meal suggestions based on remaining nutrients
+      setMealSuggestions([
+        {
+          id: "1",
+          name: "Grilled Chicken Salad",
+          calories: Math.min(400, remainingCalories),
+          protein: Math.min(25, remainingProtein),
+          carbs: 15,
+          fat: 12,
+          tags: ["high-protein", "low-carb"],
+        },
+        {
+          id: "2",
+          name: "Quinoa Buddha Bowl",
+          calories: Math.min(450, remainingCalories),
+          protein: Math.min(18, remainingProtein),
+          carbs: 45,
+          fat: 15,
+          tags: ["vegetarian", "balanced"],
+        },
+      ]);
+    }
+  }, [consumedScans, nutritionStats, dailyTargets]);
+
+  if (isLoadingRecent || isLoadingConsumed) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.light.primary} />
+          <Text style={styles.loadingText}>Loading your nutrition data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // Render restaurant card
+  const renderRestaurantCard = (restaurant: Restaurant) => (
+    <TouchableOpacity
+      key={restaurant.id}
+      style={styles.restaurantCard}
+      onPress={() => {
+        router.push({
+          pathname: "/(details)/restaurant-detail",
+          params: {
+            id: restaurant.id,
+            place_id: restaurant.place_id,
+          },
+        });
+      }}
+    >
+      <View style={styles.restaurantImageContainer}>
+        {restaurant.image ? (
+          <Image
+            source={{ uri: restaurant.image }}
+            style={styles.restaurantImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={styles.placeholderImage}>
+            <Ionicons
+              name="restaurant"
+              size={24}
+              color={Colors.light.primary}
+            />
+          </View>
+        )}
+      </View>
+      <View style={styles.restaurantInfo}>
+        <Text style={styles.restaurantName}>{restaurant.name}</Text>
+        <Text style={styles.restaurantDetails}>
+          {restaurant.cuisine} • {restaurant.rating}★ • {restaurant.distance}
+        </Text>
+        <Text style={styles.restaurantAddress} numberOfLines={1}>
+          {restaurant.vicinity}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Render meal suggestion card
+  const renderMealSuggestionCard = (meal: MealSuggestion) => (
+    <TouchableOpacity
+      key={meal.id}
+      style={styles.mealCard}
+      onPress={() => {
+        // Handle meal selection
+        Alert.alert(
+          meal.name,
+          `Calories: ${meal.calories}\nProtein: ${meal.protein}g\nCarbs: ${meal.carbs}g\nFat: ${meal.fat}g`
+        );
+      }}
+    >
+      <View style={styles.mealInfo}>
+        <Text style={styles.mealName}>{meal.name}</Text>
+        <Text style={styles.mealCalories}>{meal.calories} cal</Text>
+        <View style={styles.tagContainer}>
+          {meal.tags.map((tag, index) => (
+            <View key={index} style={styles.tag}>
+              <Text style={styles.tagText}>{tag}</Text>
+            </View>
+          ))}
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Nutrition</Text>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => router.push("/(modals)/edit-profile")}
-          >
-            <Ionicons name="person-circle-outline" size={24} color="#333" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={24} color="#333" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
       <ScrollView style={styles.scrollView}>
-        {/* Progress Metrics */}
-        <View style={styles.progressSection}>
-          <CircleProgress
-            progress={caloriesProgress}
-            color="#FF7A59"
-            title="Calories"
-          />
-          <CircleProgress
-            progress={allergiesProgress}
-            color="#6FCF97"
-            title="Allergies"
-          />
-          <CircleProgress
-            progress={healthWarningsProgress}
-            color="#333333"
-            title="Health Warnings"
-          />
+        <View style={styles.header}>
+          <Text style={styles.greeting}>
+            Hello, {user?.firstName || "there"}! 👋
+          </Text>
+          <Text style={styles.subtitle}>Here's your nutrition overview</Text>
         </View>
 
-        {/* Healthier Meal Options Section */}
-        <View style={styles.mealSection}>
-          <Text style={styles.sectionTitle}>Healthier meal options</Text>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Today's Nutrition</Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(details)/nutrition-overview")}
+            >
+              <Text style={styles.seeAllButton}>See All</Text>
+            </TouchableOpacity>
+          </View>
 
-          {articles.map((article) => (
-            <TouchableOpacity key={article.id} style={styles.articleCard}>
-              <Image source={article.image} style={styles.articleImage} />
-              <View style={styles.articleContent}>
-                <Text style={styles.articleTitle}>{article.title}</Text>
-                <Text style={styles.articleDescription}>
-                  {article.description}
+          <View style={styles.statsContainer}>
+            <CircleProgress
+              size={120}
+              strokeWidth={12}
+              progress={Math.min(
+                (nutritionStats.todayCalories / dailyTargets.calories) * 100,
+                100
+              )}
+              label="Daily Calories"
+              value={nutritionStats.todayCalories}
+            />
+            <CircleProgress
+              size={120}
+              strokeWidth={12}
+              progress={Math.min(
+                (nutritionStats.todayProtein / dailyTargets.protein) * 100,
+                100
+              )}
+              label="Protein (g)"
+              value={Math.round(nutritionStats.todayProtein)}
+            />
+            <CircleProgress
+              size={120}
+              strokeWidth={12}
+              progress={Math.min(
+                (nutritionStats.todayCarbs / dailyTargets.carbs) * 100,
+                100
+              )}
+              label="Carbs (g)"
+              value={Math.round(nutritionStats.todayCarbs)}
+            />
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Meal Suggestions</Text>
+          <Text style={styles.sectionSubtitle}>
+            Based on your nutrition goals
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.suggestionsContainer}
+          >
+            {mealSuggestions.map(renderMealSuggestionCard)}
+          </ScrollView>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Nearby Healthy Restaurants</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.restaurantsContainer}
+          >
+            {nearbyRestaurants.map(renderRestaurantCard)}
+          </ScrollView>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Scans</Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(history)/food-history")}
+            >
+              <Text style={styles.seeAllButton}>See All</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.recentScansContainer}
+          >
+            {recentScans.map((scan) => (
+              <TouchableOpacity
+                key={scan.id}
+                style={styles.scanCard}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(details)/food-detail",
+                    params: { id: scan.id },
+                  })
+                }
+              >
+                {scan.imageUrl ? (
+                  <Image
+                    source={{ uri: scan.imageUrl }}
+                    style={styles.foodImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.placeholderImage}>
+                    <Ionicons
+                      name="restaurant-outline"
+                      size={24}
+                      color={Colors.light.primary}
+                    />
+                  </View>
+                )}
+                <View style={styles.scanInfo}>
+                  <Text style={styles.foodName} numberOfLines={1}>
+                    {scan.foodName}
+                  </Text>
+                  <Text style={styles.calories}>{scan.calories}</Text>
+                  {scan.isConsumed && (
+                    <View style={styles.consumedBadge}>
+                      <Text style={styles.consumedText}>Consumed</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.addScanCard}
+              onPress={() => router.push("/(tabs)/scan")}
+            >
+              <Ionicons
+                name="add-circle-outline"
+                size={32}
+                color={Colors.light.primary}
+              />
+              <Text style={styles.addScanText}>Scan Food</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Dietary Alerts</Text>
+          {nutritionStats.todayProtein < dailyTargets.protein * 0.7 && (
+            <View style={styles.alertCard}>
+              <Ionicons name="warning" size={24} color={Colors.light.primary} />
+              <View style={styles.alertContent}>
+                <Text style={styles.alertTitle}>Daily Protein Goal</Text>
+                <Text style={styles.alertText}>
+                  You're{" "}
+                  {Math.round(
+                    dailyTargets.protein - nutritionStats.todayProtein
+                  )}
+                  g below your daily protein target. Consider adding a
+                  protein-rich snack.
                 </Text>
               </View>
-            </TouchableOpacity>
-          ))}
+            </View>
+          )}
+          {nutritionStats.todayCalories > dailyTargets.calories && (
+            <View style={styles.alertCard}>
+              <Ionicons name="warning" size={24} color="#FF9800" />
+              <View style={styles.alertContent}>
+                <Text style={styles.alertTitle}>Calorie Intake Alert</Text>
+                <Text style={styles.alertText}>
+                  You've exceeded your daily calorie target by{" "}
+                  {Math.round(
+                    nutritionStats.todayCalories - dailyTargets.calories
+                  )}{" "}
+                  calories.
+                </Text>
+              </View>
+            </View>
+          )}
         </View>
       </ScrollView>
-
-      {/* Floating Scan Button */}
-      <View style={styles.floatingButtonContainer}>
-        <TouchableOpacity
-          style={styles.floatingButton}
-          onPress={() => router.push("/(tabs)/scan")}
-        >
-          <Ionicons name="scan-outline" size={32} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
@@ -180,116 +550,249 @@ export default function NutritionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  headerIcons: {
-    flexDirection: "row",
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F8F8F8",
-    justifyContent: "center",
-    alignItems: "center",
-    marginLeft: 8,
+    backgroundColor: "#f5f5f5",
   },
   scrollView: {
     flex: 1,
   },
-  progressSection: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: Colors.light.textSecondary,
+  },
+  header: {
+    padding: 16,
+    backgroundColor: "white",
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: Colors.light.text,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: Colors.light.textSecondary,
+    marginTop: 4,
+  },
+  section: {
+    backgroundColor: "white",
+    marginBottom: 16,
+    padding: 16,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 16,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: Colors.light.text,
+  },
+  seeAllButton: {
+    color: Colors.light.primary,
+    fontWeight: "600",
+  },
+  recentScansContainer: {
+    paddingBottom: 8,
+  },
+  scanCard: {
+    width: 160,
+    backgroundColor: "white",
+    borderRadius: 12,
+    marginRight: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  foodImage: {
+    width: "100%",
+    height: 120,
+  },
+  placeholderImage: {
+    width: "100%",
+    height: 120,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scanInfo: {
+    padding: 12,
+  },
+  foodName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginBottom: 4,
+  },
+  calories: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+  },
+  consumedBadge: {
+    backgroundColor: Colors.light.primary + "15",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  consumedText: {
+    fontSize: 12,
+    color: Colors.light.primary,
+    fontWeight: "500",
+  },
+  addScanCard: {
+    width: 160,
+    height: 200,
+    backgroundColor: Colors.light.primary + "10",
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  addScanText: {
+    marginTop: 8,
+    fontSize: 16,
+    color: Colors.light.primary,
+    fontWeight: "600",
+  },
+  mealCard: {
+    width: 200,
+    backgroundColor: "white",
+    borderRadius: 12,
+    marginRight: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  mealInfo: {
+    flex: 1,
+  },
+  mealName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginBottom: 4,
+  },
+  mealCalories: {
+    fontSize: 14,
+    color: Colors.light.primary,
+    fontWeight: "500",
+  },
+  tagContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginTop: 8,
+  },
+  tag: {
+    backgroundColor: Colors.light.primary + "15",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 4,
+    marginBottom: 4,
+  },
+  tagText: {
+    fontSize: 12,
+    color: Colors.light.primary,
+  },
+  restaurantCard: {
+    width: 280,
+    backgroundColor: "white",
+    borderRadius: 12,
+    marginRight: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  restaurantImageContainer: {
+    height: 120,
+    width: "100%",
+  },
+  restaurantImage: {
+    width: "100%",
+    height: "100%",
+  },
+  restaurantInfo: {
+    padding: 12,
+  },
+  restaurantName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginBottom: 4,
+  },
+  restaurantDetails: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+  },
+  restaurantAddress: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+  },
+  suggestionsContainer: {
+    paddingVertical: 8,
+  },
+  restaurantsContainer: {
+    paddingVertical: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    marginBottom: 12,
+  },
+  alertCard: {
+    flexDirection: "row",
+    backgroundColor: Colors.light.primary + "10",
+    padding: 16,
+    borderRadius: 12,
+    alignItems: "flex-start",
+  },
+  alertContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  alertTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginBottom: 4,
+  },
+  alertText: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    lineHeight: 20,
+  },
+  statsContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "white",
     paddingVertical: 24,
-    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   progressContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
-  progressTitle: {
-    marginTop: 8,
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "500",
-  },
-  mealSection: {
-    padding: 16,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 16,
-  },
-  articleCard: {
-    flexDirection: "row",
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    marginBottom: 16,
-    overflow: "hidden",
-  },
-  articleImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 8,
-  },
-  articleContent: {
-    flex: 1,
-    padding: 12,
-    justifyContent: "center",
-  },
-  articleTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 4,
-  },
-  articleDescription: {
-    fontSize: 14,
-    color: "#666",
-    lineHeight: 20,
-  },
-  floatingButtonContainer: {
+  progressContent: {
     position: "absolute",
-    bottom: 20, // Position it above the tab bar
-    alignSelf: "center",
-    justifyContent: "center",
     alignItems: "center",
   },
-  floatingButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.light.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: Colors.light.primary,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
+  progressValue: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: Colors.light.text,
+  },
+  progressLabel: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+    marginTop: 2,
   },
 });

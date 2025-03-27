@@ -13,7 +13,7 @@ import { Text } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/Colors";
-import { Link, router } from "expo-router";
+import { Link, router, useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState, useCallback } from "react";
 import Svg, { Rect, Text as SvgText, Line } from "react-native-svg";
 import {
@@ -26,9 +26,13 @@ import {
   orderBy,
   where,
   Timestamp,
+  setDoc,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/firebaseConfig";
-import { useAuth } from "@clerk/clerk-expo";
+import CalorieProgressRing from "@/app/components/CalorieProgressRing";
+import { AnimatedCircularProgress } from "react-native-circular-progress";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 
 type ScanHistory = {
   id: string;
@@ -44,6 +48,7 @@ type ScanHistory = {
   imageUrl: string;
   timestamp: Timestamp;
   scanDate: string;
+  isConsumed: boolean;
 };
 
 type NutritionTip = {
@@ -60,17 +65,43 @@ type CalorieData = {
   scanCount: number;
 };
 
+type WeeklyCalorieData = {
+  weekStartDate: string;
+  dailyData: {
+    [date: string]: {
+      calories: number;
+      scanCount: number;
+    };
+  };
+  totalCalories: number;
+  meanCaloriesPerMeal: number;
+};
+
+type DietaryAlert = {
+  id: string;
+  type: "warning" | "info";
+  message: string;
+  icon: "warning-outline" | "nutrition-outline";
+};
+
 export default function HomeScreen() {
-  const { userId } = useAuth();
-  const [userName, setUserName] = useState<string>("");
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+  const { userId, isLoaded } = useAuth();
+  const params = useLocalSearchParams();
+  const [userName, setUserName] = useState("User");
   const [recentScans, setRecentScans] = useState<ScanHistory[]>([]);
   const [calorieData, setCalorieData] = useState<CalorieData[]>([]);
-  const [calorieTarget, setCalorieTarget] = useState(2200); // Default target
-  const [meanCalories, setMeanCalories] = useState(0);
-  const [totalWeeklyCalories, setTotalWeeklyCalories] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [dailyCalorieTarget, setDailyCalorieTarget] = useState(2000);
+  const [weeklyCalorieTarget, setWeeklyCalorieTarget] = useState(14000);
+  const [dailyCalories, setDailyCalories] = useState(0);
+  const [totalWeeklyCalories, setTotalWeeklyCalories] = useState(0);
+  const [alerts, setAlerts] = useState<DietaryAlert[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const { user } = useUser();
+  const username = user?.emailAddresses[0].emailAddress.split("@")[0];
 
   // Get short day name from date
   const getDayName = (dateString: string): string => {
@@ -99,16 +130,18 @@ export default function HomeScreen() {
 
     // Sum calories for each day using numeric values only
     scans.forEach((scan) => {
-      if (scan.scanDate && caloriesByDate[scan.scanDate] !== undefined) {
-        // Use numeric value if available
-        if (scan.caloriesNum && scan.caloriesNum > 0) {
-          caloriesByDate[scan.scanDate] += scan.caloriesNum;
-        }
+      if (
+        scan.scanDate &&
+        caloriesByDate[scan.scanDate] !== undefined &&
+        scan.isConsumed === true &&
+        typeof scan.caloriesNum === "number"
+      ) {
+        caloriesByDate[scan.scanDate] += scan.caloriesNum;
         scanCountByDate[scan.scanDate] += 1;
       }
     });
 
-    // Calculate total weekly calories and overall mean
+    // Calculate totals
     let weeklyTotal = 0;
     let totalScans = 0;
     let totalCalories = 0;
@@ -121,18 +154,95 @@ export default function HomeScreen() {
 
     setTotalWeeklyCalories(weeklyTotal);
 
-    // Set mean calories if there are any scans
     if (totalScans > 0) {
-      setMeanCalories(Math.round(totalCalories / totalScans));
+      setDailyCalories(caloriesByDate[new Date().toISOString().split("T")[0]]);
     }
 
-    // Convert to CalorieData format
+    // Save weekly data to Firestore
+    if (userId) {
+      const weekStartDate = pastDays[0];
+      const weeklyData: WeeklyCalorieData = {
+        weekStartDate,
+        dailyData: {},
+        totalCalories: weeklyTotal,
+        meanCaloriesPerMeal:
+          totalScans > 0 ? Math.round(totalCalories / totalScans) : 0,
+      };
+
+      // Add daily data
+      pastDays.forEach((day) => {
+        weeklyData.dailyData[day] = {
+          calories: caloriesByDate[day],
+          scanCount: scanCountByDate[day],
+        };
+      });
+
+      // Save to Firestore
+      setDoc(
+        doc(db, "weekly-calories", `${userId}_${weekStartDate}`),
+        {
+          ...weeklyData,
+          userId,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      ).catch((error) => {
+        console.error("Error saving weekly calorie data:", error);
+      });
+    }
+
     return pastDays.map((day) => ({
       day: getDayName(day),
       calories: caloriesByDate[day],
-      target: calorieTarget,
+      target: dailyCalorieTarget,
       scanCount: scanCountByDate[day],
     }));
+  };
+
+  // Update calorie target
+  const updateCalorieTarget = async (newTarget: number) => {
+    if (!userId) return;
+    try {
+      await setDoc(
+        doc(db, "userPreferences", userId),
+        {
+          dailyCalorieTarget: newTarget,
+          weeklyCalorieTarget: newTarget * 7,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      setDailyCalorieTarget(newTarget);
+      setWeeklyCalorieTarget(newTarget * 7);
+    } catch (error) {
+      console.error("Error updating calorie target:", error);
+      Alert.alert(
+        "Error",
+        "Failed to update calorie target. Please try again."
+      );
+    }
+  };
+
+  // Get user preferences including calorie target
+  const fetchUserPreferences = async () => {
+    if (!userId) return;
+    try {
+      const userPrefsDoc = await getDoc(doc(db, "userPreferences", userId));
+      if (userPrefsDoc.exists()) {
+        const prefs = userPrefsDoc.data();
+        setDailyCalorieTarget(prefs.dailyCalorieTarget || 2000);
+        setWeeklyCalorieTarget(prefs.weeklyCalorieTarget || 14000);
+      } else {
+        // Create default preferences if they don't exist
+        await setDoc(doc(db, "userPreferences", userId), {
+          dailyCalorieTarget: 2000,
+          weeklyCalorieTarget: 14000,
+          createdAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching user preferences:", error);
+    }
   };
 
   // Fetch user data function to be used for initial load and refresh
@@ -142,32 +252,34 @@ export default function HomeScreen() {
     try {
       setIsLoading(true);
       setError(null);
+      console.log("Fetching user data...");
 
-      // Get user data and preferences
-      const userDoc = await getDoc(doc(db, "userPreferences", userId));
-      if (userDoc.exists()) {
-        setUserName("User"); // In a real app, you would store and retrieve the user's name
-        // You could set calorie target from user preferences here if available
-      }
+      // Fetch user preferences first
+      await fetchUserPreferences();
 
-      // Get recent food scans
+      // Get recent food scans with no limit to ensure we get all data for calculations
       const scansQuery = query(
         collection(db, "nutritionData"),
         where("userId", "==", userId),
-        orderBy("timestamp", "desc"),
-        limit(10)
+        orderBy("timestamp", "desc")
       );
 
       const scansSnapshot = await getDocs(scansQuery);
+      console.log("Retrieved scans:", scansSnapshot.size);
       const scansData: ScanHistory[] = [];
 
       scansSnapshot.forEach((doc) => {
         const data = doc.data();
+        // Ensure we're correctly handling the isConsumed field
+        const isConsumed = data.isConsumed === true;
+        const caloriesNum =
+          typeof data.caloriesNum === "number" ? data.caloriesNum : 0;
+
         scansData.push({
           id: doc.id,
           foodName: data.foodName || "Unknown Food",
           calories: data.calories || "0 kcal",
-          caloriesNum: data.caloriesNum || 0,
+          caloriesNum: caloriesNum,
           protein: data.protein || "0g",
           proteinNum: data.proteinNum || 0,
           carbs: data.carbs || "0g",
@@ -177,14 +289,36 @@ export default function HomeScreen() {
           imageUrl: data.imageUrl || "",
           timestamp: data.timestamp,
           scanDate: data.scanDate || new Date().toISOString().split("T")[0],
+          isConsumed: isConsumed,
         });
       });
 
-      setRecentScans(scansData);
+      // Sort scans by date for display
+      const sortedScans = scansData.sort((a, b) => {
+        if (!a.timestamp || !b.timestamp) return 0;
+        return b.timestamp.toMillis() - a.timestamp.toMillis();
+      });
 
-      // Calculate calorie data for chart
-      const calculatedCalorieData = calculateCalorieData(scansData);
-      setCalorieData(calculatedCalorieData);
+      // Calculate daily calories before setting state
+      const today = new Date().toISOString().split("T")[0];
+      const todayScans = scansData.filter(
+        (scan) => scan.scanDate === today && scan.isConsumed === true
+      );
+      const todayTotal = todayScans.reduce(
+        (sum, scan) => sum + (scan.caloriesNum || 0),
+        0
+      );
+
+      console.log("Today's scans:", {
+        total: todayTotal,
+        scansCount: todayScans.length,
+        consumedScans: todayScans.filter((s) => s.isConsumed).length,
+      });
+
+      // Update all states at once to ensure consistency
+      setRecentScans(sortedScans.slice(0, 10));
+      setDailyCalories(todayTotal);
+      setCalorieData(calculateCalorieData(scansData));
     } catch (error) {
       console.error("Error fetching user data:", error);
       setError("Failed to load data. Please try again later.");
@@ -194,15 +328,76 @@ export default function HomeScreen() {
     }
   };
 
-  // Pull to refresh handler
-  const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchUserData();
+  // Initial data fetch
+  useEffect(() => {
+    if (userId && isLoaded) {
+      fetchUserData();
+    }
+  }, [userId, isLoaded]);
+
+  // Effect for handling refresh and calorie target updates
+  useEffect(() => {
+    if (params.refresh) {
+      fetchUserData();
+    }
+
+    if (params.calorieTarget) {
+      const newTarget = parseInt(params.calorieTarget as string);
+      if (!isNaN(newTarget)) {
+        updateCalorieTarget(newTarget);
+      }
+    }
+  }, [params]); // Depend on params object
+
+  // Add an interval refresh every minute to keep data current
+  useEffect(() => {
+    if (userId) {
+      const interval = setInterval(() => {
+        fetchUserData();
+      }, 60000); // Refresh every minute
+      return () => clearInterval(interval);
+    }
   }, [userId]);
 
+  // Update the alerts creation
   useEffect(() => {
-    fetchUserData();
-  }, [userId]);
+    if (userId) {
+      const newAlerts: DietaryAlert[] = [];
+
+      if (dailyCalories > dailyCalorieTarget) {
+        newAlerts.push({
+          id: "calories",
+          type: "warning",
+          message: "You have exceeded your daily calorie target",
+          icon: "warning-outline",
+        });
+      }
+
+      const proteinTarget = (dailyCalorieTarget * 0.2) / 4;
+      const currentProtein = recentScans
+        .filter(
+          (scan) =>
+            scan.isConsumed &&
+            scan.scanDate === new Date().toISOString().split("T")[0]
+        )
+        .reduce((sum, scan) => sum + (scan.proteinNum || 0), 0);
+
+      if (currentProtein < proteinTarget * 0.7) {
+        newAlerts.push({
+          id: "protein",
+          type: "info",
+          message: "Your protein intake is below recommended levels",
+          icon: "nutrition-outline",
+        });
+      }
+
+      setAlerts(newAlerts);
+    }
+  }, [dailyCalories, dailyCalorieTarget, recentScans]);
+
+  const handleSetTarget = () => {
+    router.push("/calorie-target");
+  };
 
   if (isLoading) {
     return (
@@ -240,17 +435,58 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Welcome</Text>
-          <Text style={styles.userName}>Let's track your nutrition today</Text>
+          <Text style={styles.headerTitle}>Welcome Back</Text>
+          <Text style={styles.userName}>{username}</Text>
         </View>
-        <TouchableOpacity style={styles.notificationButton} onPress={onRefresh}>
-          <Ionicons
-            name="refresh-outline"
-            size={24}
-            color={Colors.light.primary}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => setShowAlerts(!showAlerts)}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+            {alerts.length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {alerts.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={fetchUserData}
+          >
+            <Ionicons
+              name="refresh-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {showAlerts && alerts.length > 0 && (
+        <View style={styles.alertsContainer}>
+          {alerts.map((alert) => (
+            <View key={alert.id} style={styles.alertItem}>
+              <Ionicons
+                name={alert.icon}
+                size={24}
+                color={
+                  alert.type === "warning"
+                    ? Colors.light.error
+                    : Colors.light.primary
+                }
+              />
+              <Text style={styles.alertText}>{alert.message}</Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       <ScrollView
         style={styles.scrollView}
@@ -259,7 +495,7 @@ export default function HomeScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={onRefresh}
+            onRefresh={fetchUserData}
             colors={[Colors.light.primary]}
             tintColor={Colors.light.primary}
           />
@@ -374,114 +610,130 @@ export default function HomeScreen() {
 
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Weekly Calorie Tracker</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAllText}>View Details</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.calorieStatsContainer}>
-            <View style={styles.calorieStatCard}>
-              <Text style={styles.calorieStatValue}>{meanCalories}</Text>
-              <Text style={styles.calorieStatLabel}>Mean Cal/Meal</Text>
-            </View>
-            <View style={styles.calorieStatCard}>
-              <Text style={styles.calorieStatValue}>{totalWeeklyCalories}</Text>
-              <Text style={styles.calorieStatLabel}>Weekly Cal</Text>
-            </View>
-            <View style={styles.calorieStatCard}>
-              <Text style={styles.calorieStatValue}>
-                {Math.round(totalWeeklyCalories / 7)}
-              </Text>
-              <Text style={styles.calorieStatLabel}>Daily Avg</Text>
+            <Text style={styles.sectionTitle}>Calorie Tracker</Text>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleSetTarget}>
+                <View style={styles.targetButton}>
+                  <Ionicons
+                    name="settings-outline"
+                    size={20}
+                    color={Colors.light.primary}
+                  />
+                  <Text style={styles.targetButtonText}>Set Target</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.seeAllButton}
+                onPress={() => router.push("/(details)/nutrition-overview")}
+              >
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          <View style={styles.calorieChartContainer}>
-            <View style={styles.chartYAxis}>
-              <Text style={styles.chartAxisLabel}>2500</Text>
-              <Text style={styles.chartAxisLabel}>2000</Text>
-              <Text style={styles.chartAxisLabel}>1500</Text>
-              <Text style={styles.chartAxisLabel}>1000</Text>
-              <Text style={styles.chartAxisLabel}>500</Text>
-              <Text style={styles.chartAxisLabel}>0</Text>
-            </View>
-
-            <View style={styles.chartMainContainer}>
-              <View style={styles.gridLinesContainer}>
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <View key={i} style={styles.gridLine} />
-                ))}
+          <View style={styles.progressContainer}>
+            <View style={styles.progressCard}>
+              <View style={styles.progressSection}>
+                <View style={styles.progressHeader}>
+                  <Ionicons
+                    name="today-outline"
+                    size={24}
+                    color={Colors.light.primary}
+                  />
+                  <Text style={styles.progressTitle}>Today's Calories</Text>
+                </View>
+                <AnimatedCircularProgress
+                  size={160}
+                  width={12}
+                  fill={(dailyCalories / dailyCalorieTarget) * 100}
+                  tintColor={Colors.light.primary}
+                  backgroundColor={Colors.light.surface}
+                  rotation={0}
+                  lineCap="round"
+                >
+                  {(fill) => (
+                    <View style={styles.progressTextContainer}>
+                      <Text style={styles.progressValue}>
+                        {Math.round(dailyCalories)}
+                      </Text>
+                      <Text style={styles.progressTarget}>
+                        of {dailyCalorieTarget}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.progressPercentage,
+                          {
+                            color:
+                              fill > 100
+                                ? Colors.light.error
+                                : Colors.light.primary,
+                          },
+                        ]}
+                      >
+                        {Math.round(fill)}%
+                      </Text>
+                    </View>
+                  )}
+                </AnimatedCircularProgress>
               </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chartScrollContent}
-              >
-                <View style={styles.chartContent}>
-                  {calorieData.map((data, index) => {
-                    const barHeight = (data.calories / 2500) * 200;
-                    const targetLinePosition = 200 - (data.target / 2500) * 200;
+              <View style={styles.divider} />
 
-                    return (
-                      <View key={index} style={styles.barContainer}>
-                        <View style={styles.barLabelContainer}>
-                          <View
-                            style={[
-                              styles.bar,
-                              {
-                                height: Math.max(barHeight, 1), // Ensure bar is at least 1px tall
-                                backgroundColor:
-                                  data.calories > data.target
-                                    ? "#FF6B6B"
-                                    : Colors.light.primary,
-                              },
-                            ]}
-                          />
-                          <View
-                            style={[
-                              styles.targetLine,
-                              { bottom: targetLinePosition },
-                            ]}
-                          />
-                        </View>
-                        <Text style={styles.barLabel}>{data.day}</Text>
-                        <Text style={styles.calorieValue}>{data.calories}</Text>
-                      </View>
-                    );
-                  })}
+              <View style={styles.progressSection}>
+                <View style={styles.progressHeader}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={24}
+                    color={Colors.light.secondary}
+                  />
+                  <Text
+                    style={[
+                      styles.progressTitle,
+                      { color: Colors.light.secondary },
+                    ]}
+                  >
+                    Weekly Calories
+                  </Text>
                 </View>
-              </ScrollView>
-            </View>
-          </View>
-
-          <View style={styles.calorieInfoContainer}>
-            <View style={styles.calorieInfoItem}>
-              <View
-                style={[
-                  styles.legendBox,
-                  { backgroundColor: Colors.light.primary },
-                ]}
-              />
-              <Text style={styles.legendText}>Under Target</Text>
-            </View>
-            <View style={styles.calorieInfoItem}>
-              <View
-                style={[styles.legendBox, { backgroundColor: "#FF6B6B" }]}
-              />
-              <Text style={styles.legendText}>Over Target</Text>
-            </View>
-            <View style={styles.calorieInfoItem}>
-              <View
-                style={[
-                  styles.legendBox,
-                  { backgroundColor: "#333", width: 20, height: 2 },
-                ]}
-              />
-              <Text style={styles.legendText}>
-                Target ({calorieTarget} cal)
-              </Text>
+                <AnimatedCircularProgress
+                  size={160}
+                  width={12}
+                  fill={(totalWeeklyCalories / weeklyCalorieTarget) * 100}
+                  tintColor={Colors.light.secondary}
+                  backgroundColor={Colors.light.surface}
+                  rotation={0}
+                  lineCap="round"
+                >
+                  {(fill) => (
+                    <View style={styles.progressTextContainer}>
+                      <Text
+                        style={[
+                          styles.progressValue,
+                          { color: Colors.light.secondary },
+                        ]}
+                      >
+                        {Math.round(totalWeeklyCalories)}
+                      </Text>
+                      <Text style={styles.progressTarget}>
+                        of {weeklyCalorieTarget}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.progressPercentage,
+                          {
+                            color:
+                              fill > 100
+                                ? Colors.light.error
+                                : Colors.light.secondary,
+                          },
+                        ]}
+                      >
+                        {Math.round(fill)}%
+                      </Text>
+                    </View>
+                  )}
+                </AnimatedCircularProgress>
+              </View>
             </View>
           </View>
         </View>
@@ -514,8 +766,69 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: Colors.light.text,
   },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   notificationButton: {
     padding: 4,
+    marginRight: 8,
+    position: "relative",
+  },
+  refreshButton: {
+    padding: 4,
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    backgroundColor: Colors.light.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  notificationBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  alertsContainer: {
+    backgroundColor: Colors.light.background,
+    borderRadius: 12,
+    margin: 16,
+    padding: 16,
+    shadowColor: Colors.light.text,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  alertItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.border,
+  },
+  alertText: {
+    marginLeft: 12,
+    fontSize: 14,
+    color: Colors.light.text,
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  seeAllButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
   scrollView: {
     flex: 1,
@@ -847,5 +1160,86 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: Colors.light.textSecondary,
     textAlign: "center",
+  },
+  calorieStatProgress: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+    textAlign: "center",
+  },
+  targetButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.light.background,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+  },
+  targetButtonText: {
+    marginLeft: 4,
+    fontSize: 14,
+    color: Colors.light.primary,
+    fontWeight: "600",
+  },
+  progressContainer: {
+    paddingVertical: 16,
+  },
+  progressCard: {
+    backgroundColor: Colors.light.background,
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: Colors.light.text,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  progressSection: {
+    alignItems: "center",
+    paddingVertical: 16,
+  },
+  progressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
+  },
+  progressTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: Colors.light.primary,
+    marginLeft: 8,
+  },
+  progressTextContainer: {
+    alignItems: "center",
+  },
+  progressValue: {
+    fontSize: 32,
+    fontWeight: "bold",
+    color: Colors.light.primary,
+  },
+  progressTarget: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    marginTop: 4,
+  },
+  progressPercentage: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 8,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.light.border,
+    marginVertical: 8,
+    opacity: 0.5,
+  },
+  statsGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    width: "100%",
   },
 });

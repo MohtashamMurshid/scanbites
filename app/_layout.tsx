@@ -5,36 +5,79 @@ import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import "react-native-reanimated";
 import { View, ActivityIndicator } from "react-native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { useColorScheme } from "@/hooks/useColorScheme";
 import { ClerkProvider, ClerkLoaded, useAuth } from "@clerk/clerk-expo";
 import { tokenCache } from "@/cache";
 import Colors from "@/constants/Colors";
 
+// Create a client
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 1000 * 60 * 5, // Data is fresh for 5 minutes
+      gcTime: 1000 * 60 * 30, // Cache is kept for 30 minutes
+      retry: 2,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+    },
+  },
+});
+
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { isSignedIn, isLoaded } = useAuth();
-  const colorScheme = useColorScheme();
+  const { isLoaded, isSignedIn } = useAuth();
 
   if (!isLoaded) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
-        <ActivityIndicator size="large" color={Colors.light.primary} />
+        <ActivityIndicator size="large" color={Colors.light.tint} />
       </View>
     );
   }
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      {isSignedIn ? (
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      ) : (
-        <Stack.Screen name="(onboarding)" options={{ headerShown: false }} />
-      )}
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen name="(modals)" options={{ headerShown: false }} />
+    <Stack
+      screenOptions={{
+        headerStyle: {
+          backgroundColor: "white",
+        },
+        headerShadowVisible: false,
+      }}
+    >
+      <Stack.Screen
+        name="(auth)"
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="(onboarding)"
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="(tabs)"
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="(details)"
+        options={{
+          headerShown: false,
+        }}
+      />
+      <Stack.Screen
+        name="(history)"
+        options={{
+          headerShown: false,
+        }}
+      />
     </Stack>
   );
 }
@@ -57,10 +100,12 @@ export default function RootLayout() {
   const publishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY!;
 
   return (
-    <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
-      <ClerkLoaded>
-        <RootLayoutNav />
-      </ClerkLoaded>
-    </ClerkProvider>
+    <QueryClientProvider client={queryClient}>
+      <ClerkProvider publishableKey={publishableKey} tokenCache={tokenCache}>
+        <ClerkLoaded>
+          <RootLayoutNav />
+        </ClerkLoaded>
+      </ClerkProvider>
+    </QueryClientProvider>
   );
 }
