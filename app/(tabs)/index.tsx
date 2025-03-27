@@ -32,7 +32,7 @@ import {
 import { db } from "@/firebaseConfig";
 import CalorieProgressRing from "@/app/components/CalorieProgressRing";
 import { AnimatedCircularProgress } from "react-native-circular-progress";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 
 type ScanHistory = {
   id: string;
@@ -77,6 +77,13 @@ type WeeklyCalorieData = {
   meanCaloriesPerMeal: number;
 };
 
+type DietaryAlert = {
+  id: string;
+  type: "warning" | "info";
+  message: string;
+  icon: "warning-outline" | "nutrition-outline";
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { userId, isLoaded } = useAuth();
@@ -91,6 +98,10 @@ export default function HomeScreen() {
   const [weeklyCalorieTarget, setWeeklyCalorieTarget] = useState(14000);
   const [dailyCalories, setDailyCalories] = useState(0);
   const [totalWeeklyCalories, setTotalWeeklyCalories] = useState(0);
+  const [alerts, setAlerts] = useState<DietaryAlert[]>([]);
+  const [showAlerts, setShowAlerts] = useState(false);
+  const { user } = useUser();
+  const username = user?.emailAddresses[0].emailAddress.split("@")[0];
 
   // Get short day name from date
   const getDayName = (dateString: string): string => {
@@ -348,6 +359,42 @@ export default function HomeScreen() {
     }
   }, [userId]);
 
+  // Update the alerts creation
+  useEffect(() => {
+    if (userId) {
+      const newAlerts: DietaryAlert[] = [];
+
+      if (dailyCalories > dailyCalorieTarget) {
+        newAlerts.push({
+          id: "calories",
+          type: "warning",
+          message: "You have exceeded your daily calorie target",
+          icon: "warning-outline",
+        });
+      }
+
+      const proteinTarget = (dailyCalorieTarget * 0.2) / 4;
+      const currentProtein = recentScans
+        .filter(
+          (scan) =>
+            scan.isConsumed &&
+            scan.scanDate === new Date().toISOString().split("T")[0]
+        )
+        .reduce((sum, scan) => sum + (scan.proteinNum || 0), 0);
+
+      if (currentProtein < proteinTarget * 0.7) {
+        newAlerts.push({
+          id: "protein",
+          type: "info",
+          message: "Your protein intake is below recommended levels",
+          icon: "nutrition-outline",
+        });
+      }
+
+      setAlerts(newAlerts);
+    }
+  }, [dailyCalories, dailyCalorieTarget, recentScans]);
+
   const handleSetTarget = () => {
     router.push("/calorie-target");
   };
@@ -388,20 +435,58 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>Welcome</Text>
-          <Text style={styles.userName}>Let's track your nutrition today</Text>
+          <Text style={styles.headerTitle}>Welcome Back</Text>
+          <Text style={styles.userName}>{username}</Text>
         </View>
-        <TouchableOpacity
-          style={styles.notificationButton}
-          onPress={fetchUserData}
-        >
-          <Ionicons
-            name="refresh-outline"
-            size={24}
-            color={Colors.light.primary}
-          />
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={styles.notificationButton}
+            onPress={() => setShowAlerts(!showAlerts)}
+          >
+            <Ionicons
+              name="notifications-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+            {alerts.length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>
+                  {alerts.length}
+                </Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.refreshButton}
+            onPress={fetchUserData}
+          >
+            <Ionicons
+              name="refresh-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {showAlerts && alerts.length > 0 && (
+        <View style={styles.alertsContainer}>
+          {alerts.map((alert) => (
+            <View key={alert.id} style={styles.alertItem}>
+              <Ionicons
+                name={alert.icon}
+                size={24}
+                color={
+                  alert.type === "warning"
+                    ? Colors.light.error
+                    : Colors.light.primary
+                }
+              />
+              <Text style={styles.alertText}>{alert.message}</Text>
+            </View>
+          ))}
+        </View>
+      )}
 
       <ScrollView
         style={styles.scrollView}
@@ -526,65 +611,129 @@ export default function HomeScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Calorie Tracker</Text>
-            <TouchableOpacity onPress={handleSetTarget}>
-              <View style={styles.targetButton}>
-                <Ionicons
-                  name="settings-outline"
-                  size={20}
-                  color={Colors.light.primary}
-                />
-                <Text style={styles.targetButtonText}>Set Target</Text>
-              </View>
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity onPress={handleSetTarget}>
+                <View style={styles.targetButton}>
+                  <Ionicons
+                    name="settings-outline"
+                    size={20}
+                    color={Colors.light.primary}
+                  />
+                  <Text style={styles.targetButtonText}>Set Target</Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.seeAllButton}
+                onPress={() => router.push("/(details)/nutrition-overview")}
+              >
+                <Text style={styles.seeAllText}>See All</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.progressContainer}>
-            <View style={styles.progressSection}>
-              <Text style={styles.progressTitle}>Today's Calories</Text>
-              <AnimatedCircularProgress
-                size={150}
-                width={15}
-                fill={(dailyCalories / dailyCalorieTarget) * 100}
-                tintColor={Colors.light.primary}
-                backgroundColor={Colors.light.surface}
-                rotation={0}
-                lineCap="round"
-              >
-                {() => (
-                  <View style={styles.progressTextContainer}>
-                    <Text style={styles.progressValue}>
-                      {Math.round(dailyCalories)}
-                    </Text>
-                    <Text style={styles.progressTarget}>
-                      / {dailyCalorieTarget}
-                    </Text>
-                  </View>
-                )}
-              </AnimatedCircularProgress>
-            </View>
+            <View style={styles.progressCard}>
+              <View style={styles.progressSection}>
+                <View style={styles.progressHeader}>
+                  <Ionicons
+                    name="today-outline"
+                    size={24}
+                    color={Colors.light.primary}
+                  />
+                  <Text style={styles.progressTitle}>Today's Calories</Text>
+                </View>
+                <AnimatedCircularProgress
+                  size={160}
+                  width={12}
+                  fill={(dailyCalories / dailyCalorieTarget) * 100}
+                  tintColor={Colors.light.primary}
+                  backgroundColor={Colors.light.surface}
+                  rotation={0}
+                  lineCap="round"
+                >
+                  {(fill) => (
+                    <View style={styles.progressTextContainer}>
+                      <Text style={styles.progressValue}>
+                        {Math.round(dailyCalories)}
+                      </Text>
+                      <Text style={styles.progressTarget}>
+                        of {dailyCalorieTarget}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.progressPercentage,
+                          {
+                            color:
+                              fill > 100
+                                ? Colors.light.error
+                                : Colors.light.primary,
+                          },
+                        ]}
+                      >
+                        {Math.round(fill)}%
+                      </Text>
+                    </View>
+                  )}
+                </AnimatedCircularProgress>
+              </View>
 
-            <View style={styles.progressSection}>
-              <Text style={styles.progressTitle}>Weekly Calories</Text>
-              <AnimatedCircularProgress
-                size={150}
-                width={15}
-                fill={(totalWeeklyCalories / weeklyCalorieTarget) * 100}
-                tintColor={Colors.light.secondary}
-                backgroundColor={Colors.light.surface}
-                rotation={0}
-                lineCap="round"
-              >
-                {() => (
-                  <View style={styles.progressTextContainer}>
-                    <Text style={styles.progressValue}>
-                      {Math.round(totalWeeklyCalories)}
-                    </Text>
-                    <Text style={styles.progressTarget}>
-                      / {weeklyCalorieTarget}
-                    </Text>
-                  </View>
-                )}
-              </AnimatedCircularProgress>
+              <View style={styles.divider} />
+
+              <View style={styles.progressSection}>
+                <View style={styles.progressHeader}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={24}
+                    color={Colors.light.secondary}
+                  />
+                  <Text
+                    style={[
+                      styles.progressTitle,
+                      { color: Colors.light.secondary },
+                    ]}
+                  >
+                    Weekly Calories
+                  </Text>
+                </View>
+                <AnimatedCircularProgress
+                  size={160}
+                  width={12}
+                  fill={(totalWeeklyCalories / weeklyCalorieTarget) * 100}
+                  tintColor={Colors.light.secondary}
+                  backgroundColor={Colors.light.surface}
+                  rotation={0}
+                  lineCap="round"
+                >
+                  {(fill) => (
+                    <View style={styles.progressTextContainer}>
+                      <Text
+                        style={[
+                          styles.progressValue,
+                          { color: Colors.light.secondary },
+                        ]}
+                      >
+                        {Math.round(totalWeeklyCalories)}
+                      </Text>
+                      <Text style={styles.progressTarget}>
+                        of {weeklyCalorieTarget}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.progressPercentage,
+                          {
+                            color:
+                              fill > 100
+                                ? Colors.light.error
+                                : Colors.light.secondary,
+                          },
+                        ]}
+                      >
+                        {Math.round(fill)}%
+                      </Text>
+                    </View>
+                  )}
+                </AnimatedCircularProgress>
+              </View>
             </View>
           </View>
         </View>
@@ -617,8 +766,69 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: Colors.light.text,
   },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   notificationButton: {
     padding: 4,
+    marginRight: 8,
+    position: "relative",
+  },
+  refreshButton: {
+    padding: 4,
+  },
+  notificationBadge: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    backgroundColor: Colors.light.error,
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  notificationBadgeText: {
+    color: "white",
+    fontSize: 12,
+    fontWeight: "bold",
+  },
+  alertsContainer: {
+    backgroundColor: Colors.light.background,
+    borderRadius: 12,
+    margin: 16,
+    padding: 16,
+    shadowColor: Colors.light.text,
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  alertItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.border,
+  },
+  alertText: {
+    marginLeft: 12,
+    fontSize: 14,
+    color: Colors.light.text,
+    flex: 1,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  seeAllButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
   },
   scrollView: {
     flex: 1,
@@ -973,33 +1183,59 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   progressContainer: {
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 20,
-    gap: 32,
+    paddingVertical: 16,
+  },
+  progressCard: {
+    backgroundColor: Colors.light.background,
+    borderRadius: 20,
+    padding: 20,
+    shadowColor: Colors.light.text,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
   },
   progressSection: {
     alignItems: "center",
+    paddingVertical: 16,
+  },
+  progressHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 20,
   },
   progressTitle: {
     fontSize: 18,
     fontWeight: "600",
-    color: Colors.light.text,
-    marginBottom: 16,
+    color: Colors.light.primary,
+    marginLeft: 8,
   },
   progressTextContainer: {
     alignItems: "center",
   },
   progressValue: {
-    fontSize: 24,
+    fontSize: 32,
     fontWeight: "bold",
-    color: Colors.light.text,
+    color: Colors.light.primary,
   },
   progressTarget: {
-    fontSize: 16,
+    fontSize: 14,
     color: Colors.light.textSecondary,
     marginTop: 4,
+  },
+  progressPercentage: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginTop: 8,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: Colors.light.border,
+    marginVertical: 8,
+    opacity: 0.5,
   },
   statsGrid: {
     flexDirection: "row",
