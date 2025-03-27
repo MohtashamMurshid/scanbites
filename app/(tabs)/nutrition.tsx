@@ -8,12 +8,14 @@ import {
   TouchableOpacity,
   SafeAreaView,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/Colors";
 import Svg, { Circle } from "react-native-svg";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { router } from "expo-router";
+import { useRecentScans, useConsumedScans } from "@/hooks/useQueries";
 
 type Article = {
   id: string;
@@ -22,157 +24,222 @@ type Article = {
   image: any;
 };
 
+const CircleProgress = ({
+  size,
+  strokeWidth,
+  progress,
+  label,
+  value,
+}: {
+  size: number;
+  strokeWidth: number;
+  progress: number;
+  label: string;
+  value: string | number;
+}) => {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const progressOffset = circumference - (progress / 100) * circumference;
+
+  return (
+    <View style={styles.progressContainer}>
+      <Svg width={size} height={size}>
+        <Circle
+          stroke="#E8E8E8"
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+        />
+        <Circle
+          stroke={Colors.light.primary}
+          fill="none"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          strokeWidth={strokeWidth}
+          strokeDasharray={`${circumference} ${circumference}`}
+          strokeDashoffset={progressOffset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </Svg>
+      <View style={styles.progressContent}>
+        <Text style={styles.progressValue}>{value}</Text>
+        <Text style={styles.progressLabel}>{label}</Text>
+      </View>
+    </View>
+  );
+};
+
 export default function NutritionScreen() {
+  const { userId } = useAuth();
   const { user } = useUser();
 
-  // Mock data for the progress indicators
-  const caloriesProgress = 0.35; // 35% progress
-  const allergiesProgress = 0.7; // 70% progress
-  const healthWarningsProgress = 0.2; // 20% progress
+  // Use TanStack Query hooks
+  const { data: recentScans = [], isLoading: isLoadingRecent } =
+    useRecentScans(5);
+  const { data: consumedScans = [], isLoading: isLoadingConsumed } =
+    useConsumedScans();
 
-  // Mock data for the articles
-  const articles: Article[] = [
-    {
-      id: "1",
-      title: "Benefits of Eating Whole Foods",
-      description:
-        "Eating whole foods provides essential nutrients for overall health.",
-      image: require("../../assets/images/onboarding-01.png"),
-    },
-    {
-      id: "2",
-      title: "Healthy Snack Options",
-      description: "Opt for fruits, nuts, or yogurt for guilt-free snacking.",
-      image: require("../../assets/images/onboarding-02..png"),
-    },
-    {
-      id: "3",
-      title: "Benefits of Eating Whole Foods",
-      description:
-        "Eating whole foods provides essential nutrients for overall health.",
-      image: require("../../assets/images/onboarding-03.png"),
-    },
-    {
-      id: "4",
-      title: "Healthy Snack Options",
-      description: "Opt for fruits, nuts, or yogurt for guilt-free snacking.",
-      image: require("../../assets/images/onboarding-01.png"),
-    },
-  ];
+  // Calculate nutrition stats
+  const nutritionStats = React.useMemo(() => {
+    if (!consumedScans.length) {
+      return {
+        totalCalories: 0,
+        averageCalories: 0,
+        scansCount: 0,
+      };
+    }
 
-  // Circle Progress component
-  const CircleProgress = ({
-    progress,
-    color,
-    title,
-    size = 80,
-    strokeWidth = 8,
-  }: {
-    progress: number;
-    color: string;
-    title: string;
-    size?: number;
-    strokeWidth?: number;
-  }) => {
-    const radius = (size - strokeWidth) / 2;
-    const circumference = radius * 2 * Math.PI;
-    const strokeDashoffset = circumference * (1 - progress);
-
-    return (
-      <View style={styles.progressContainer}>
-        <Svg width={size} height={size}>
-          {/* Background Circle */}
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke="#E0E0E0"
-            strokeWidth={strokeWidth}
-            fill="transparent"
-          />
-          {/* Progress Circle */}
-          <Circle
-            cx={size / 2}
-            cy={size / 2}
-            r={radius}
-            stroke={color}
-            strokeWidth={strokeWidth}
-            fill="transparent"
-            strokeDasharray={`${circumference} ${circumference}`}
-            strokeDashoffset={strokeDashoffset}
-            strokeLinecap="round"
-            transform={`rotate(-90, ${size / 2}, ${size / 2})`}
-          />
-        </Svg>
-        <Text style={styles.progressTitle}>{title}</Text>
-      </View>
+    const totalCals = consumedScans.reduce(
+      (sum, scan) => sum + (scan.caloriesNum || 0),
+      0
     );
-  };
+
+    return {
+      totalCalories: totalCals,
+      averageCalories: Math.round(totalCals / consumedScans.length),
+      scansCount: consumedScans.length,
+    };
+  }, [consumedScans]);
+
+  if (isLoadingRecent || isLoadingConsumed) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={Colors.light.primary} />
+          <Text style={styles.loadingText}>Loading your nutrition data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Nutrition</Text>
-        <View style={styles.headerIcons}>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => router.push("/(modals)/edit-profile")}
-          >
-            <Ionicons name="person-circle-outline" size={24} color="#333" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton}>
-            <Ionicons name="notifications-outline" size={24} color="#333" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
       <ScrollView style={styles.scrollView}>
-        {/* Progress Metrics */}
-        <View style={styles.progressSection}>
+        <View style={styles.header}>
+          <Text style={styles.greeting}>
+            Hello, {user?.firstName || "there"}! 👋
+          </Text>
+          <Text style={styles.subtitle}>Here's your nutrition overview</Text>
+        </View>
+
+        <View style={styles.statsContainer}>
           <CircleProgress
-            progress={caloriesProgress}
-            color="#FF7A59"
-            title="Calories"
+            size={120}
+            strokeWidth={12}
+            progress={Math.min(
+              (nutritionStats.averageCalories / 2000) * 100,
+              100
+            )}
+            label="Daily Calories"
+            value={nutritionStats.averageCalories}
           />
           <CircleProgress
-            progress={allergiesProgress}
-            color="#6FCF97"
-            title="Allergies"
+            size={120}
+            strokeWidth={12}
+            progress={Math.min((nutritionStats.scansCount / 10) * 100, 100)}
+            label="Total Scans"
+            value={nutritionStats.scansCount}
           />
           <CircleProgress
-            progress={healthWarningsProgress}
-            color="#333333"
-            title="Health Warnings"
+            size={120}
+            strokeWidth={12}
+            progress={Math.min(
+              (nutritionStats.totalCalories / 10000) * 100,
+              100
+            )}
+            label="Total Calories"
+            value={nutritionStats.totalCalories}
           />
         </View>
 
-        {/* Healthier Meal Options Section */}
-        <View style={styles.mealSection}>
-          <Text style={styles.sectionTitle}>Healthier meal options</Text>
-
-          {articles.map((article) => (
-            <TouchableOpacity key={article.id} style={styles.articleCard}>
-              <Image source={article.image} style={styles.articleImage} />
-              <View style={styles.articleContent}>
-                <Text style={styles.articleTitle}>{article.title}</Text>
-                <Text style={styles.articleDescription}>
-                  {article.description}
-                </Text>
-              </View>
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Recent Scans</Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(history)/food-history")}
+            >
+              <Text style={styles.seeAllButton}>See All</Text>
             </TouchableOpacity>
-          ))}
+          </View>
+
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.recentScansContainer}
+          >
+            {recentScans.map((scan) => (
+              <TouchableOpacity
+                key={scan.id}
+                style={styles.scanCard}
+                onPress={() =>
+                  router.push({
+                    pathname: "/(details)/food-detail",
+                    params: { id: scan.id },
+                  })
+                }
+              >
+                {scan.imageUrl ? (
+                  <Image
+                    source={{ uri: scan.imageUrl }}
+                    style={styles.foodImage}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View style={styles.placeholderImage}>
+                    <Ionicons
+                      name="restaurant-outline"
+                      size={24}
+                      color={Colors.light.primary}
+                    />
+                  </View>
+                )}
+                <View style={styles.scanInfo}>
+                  <Text style={styles.foodName} numberOfLines={1}>
+                    {scan.foodName}
+                  </Text>
+                  <Text style={styles.calories}>{scan.calories}</Text>
+                  {scan.isConsumed && (
+                    <View style={styles.consumedBadge}>
+                      <Text style={styles.consumedText}>Consumed</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={styles.addScanCard}
+              onPress={() => router.push("/(tabs)/scan")}
+            >
+              <Ionicons
+                name="add-circle-outline"
+                size={32}
+                color={Colors.light.primary}
+              />
+              <Text style={styles.addScanText}>Scan Food</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Nutrition Tips</Text>
+          <View style={styles.tipCard}>
+            <Ionicons
+              name="bulb-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+            <Text style={styles.tipText}>
+              Track your meals regularly to maintain a balanced diet and achieve
+              your health goals.
+            </Text>
+          </View>
         </View>
       </ScrollView>
-
-      {/* Floating Scan Button */}
-      <View style={styles.floatingButtonContainer}>
-        <TouchableOpacity
-          style={styles.floatingButton}
-          onPress={() => router.push("/(tabs)/scan")}
-        >
-          <Ionicons name="scan-outline" size={32} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 }
@@ -180,116 +247,156 @@ export default function NutritionScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#FFFFFF",
-  },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F0F0F0",
-  },
-  headerTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-  },
-  headerIcons: {
-    flexDirection: "row",
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "#F8F8F8",
-    justifyContent: "center",
-    alignItems: "center",
-    marginLeft: 8,
+    backgroundColor: "#f5f5f5",
   },
   scrollView: {
     flex: 1,
   },
-  progressSection: {
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: Colors.light.textSecondary,
+  },
+  header: {
+    padding: 16,
+    backgroundColor: "white",
+  },
+  greeting: {
+    fontSize: 24,
+    fontWeight: "bold",
+    color: Colors.light.text,
+  },
+  subtitle: {
+    fontSize: 16,
+    color: Colors.light.textSecondary,
+    marginTop: 4,
+  },
+  statsContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
+    alignItems: "center",
+    backgroundColor: "white",
     paddingVertical: 24,
-    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   progressContainer: {
     alignItems: "center",
     justifyContent: "center",
   },
-  progressTitle: {
-    marginTop: 8,
-    fontSize: 14,
-    color: "#333",
-    fontWeight: "500",
+  progressContent: {
+    position: "absolute",
+    alignItems: "center",
   },
-  mealSection: {
+  progressValue: {
+    fontSize: 18,
+    fontWeight: "bold",
+    color: Colors.light.text,
+  },
+  progressLabel: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+    marginTop: 2,
+  },
+  section: {
+    backgroundColor: "white",
+    marginBottom: 16,
     padding: 16,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 16,
-  },
-  articleCard: {
+  sectionHeader: {
     flexDirection: "row",
-    backgroundColor: "#FFF",
-    borderRadius: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 16,
-    overflow: "hidden",
   },
-  articleImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 8,
-  },
-  articleContent: {
-    flex: 1,
-    padding: 12,
-    justifyContent: "center",
-  },
-  articleTitle: {
-    fontSize: 16,
+  sectionTitle: {
+    fontSize: 18,
     fontWeight: "bold",
-    color: "#333",
+    color: Colors.light.text,
+  },
+  seeAllButton: {
+    color: Colors.light.primary,
+    fontWeight: "600",
+  },
+  recentScansContainer: {
+    paddingBottom: 8,
+  },
+  scanCard: {
+    width: 160,
+    backgroundColor: "white",
+    borderRadius: 12,
+    marginRight: 12,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "#eeeeee",
+  },
+  foodImage: {
+    width: "100%",
+    height: 120,
+  },
+  placeholderImage: {
+    width: "100%",
+    height: 120,
+    backgroundColor: "#f0f0f0",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  scanInfo: {
+    padding: 12,
+  },
+  foodName: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.light.text,
     marginBottom: 4,
   },
-  articleDescription: {
+  calories: {
     fontSize: 14,
-    color: "#666",
+    color: Colors.light.textSecondary,
+  },
+  consumedBadge: {
+    backgroundColor: Colors.light.primary + "15",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 8,
+  },
+  consumedText: {
+    fontSize: 12,
+    color: Colors.light.primary,
+    fontWeight: "500",
+  },
+  addScanCard: {
+    width: 160,
+    height: 200,
+    backgroundColor: Colors.light.primary + "10",
+    borderRadius: 12,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  addScanText: {
+    marginTop: 8,
+    fontSize: 16,
+    color: Colors.light.primary,
+    fontWeight: "600",
+  },
+  tipCard: {
+    flexDirection: "row",
+    backgroundColor: Colors.light.primary + "10",
+    padding: 16,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  tipText: {
+    flex: 1,
+    marginLeft: 12,
+    fontSize: 14,
+    color: Colors.light.text,
     lineHeight: 20,
-  },
-  floatingButtonContainer: {
-    position: "absolute",
-    bottom: 20, // Position it above the tab bar
-    alignSelf: "center",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  floatingButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: Colors.light.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: Colors.light.primary,
-    shadowOffset: {
-      width: 0,
-      height: 4,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
   },
 });

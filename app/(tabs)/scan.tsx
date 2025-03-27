@@ -21,10 +21,18 @@ import {
   serverTimestamp,
   doc,
   getDoc,
+  updateDoc,
+  query,
+  where,
+  getDocs,
+  limit,
+  orderBy,
 } from "firebase/firestore";
 import { useAuth } from "@clerk/clerk-expo";
 import OpenAI from "openai";
 import Constants from "expo-constants";
+import { useRouter } from "expo-router";
+import { useMarkAsConsumed } from "@/hooks/useQueries";
 
 // Cloudinary configuration
 const CLOUDINARY_CLOUD_NAME = "dlt3gguqq";
@@ -50,6 +58,7 @@ const openai = new OpenAI({
 
 // Nutrition info type
 interface NutritionInfo {
+  id?: string;
   foodName: string;
   calories: string;
   protein: string;
@@ -58,9 +67,11 @@ interface NutritionInfo {
   fiber: string;
   sugar: string;
   allergens?: string[];
+  ingredients?: string[];
   additionalInfo?: string;
   healthTips?: string;
   personalizedRecommendation?: string;
+  isConsumed?: boolean;
 }
 
 // User preferences type
@@ -87,6 +98,8 @@ export default function ScanScreen() {
     useState<UserPreferences | null>(null);
   const [isLoadingPreferences, setIsLoadingPreferences] = useState(true);
   const { userId } = useAuth();
+  const router = useRouter();
+  const markAsConsumed = useMarkAsConsumed();
 
   useEffect(() => {
     (async () => {
@@ -496,12 +509,13 @@ export default function ScanScreen() {
       systemContent +=
         "\n\nYour response should be a well-structured JSON object with the following fields:" +
         "\n- foodName: Name of the food" +
-        "\n- calories: Calorie content with units" +
-        "\n- protein: Protein content with units" +
-        "\n- carbs: Carbohydrate content with units" +
-        "\n- fat: Fat content with units" +
-        "\n- fiber: Fiber content with units" +
-        "\n- sugar: Sugar content with units" +
+        "\n- calories: Calorie content with units just numbers" +
+        "\n- protein: Protein content with units just numbers" +
+        "\n- carbs: Carbohydrate content with units just numbers" +
+        "\n- fat: Fat content with units just numbers" +
+        "\n- fiber: Fiber content with units just numbers" +
+        "\n- sugar: Sugar content with units just numbers" +
+        "\n- ingredients: Array of ingredients in the food" +
         "\n- allergens: Array of allergens present in the food" +
         "\n- additionalInfo: General nutritional information" +
         "\n- healthTips: General health advice related to this food" +
@@ -906,76 +920,159 @@ export default function ScanScreen() {
       personalizedRecommendation: userPreferences
         ? personalizedRecommendation
         : undefined,
+      isConsumed: false,
     };
   };
 
   // Helper function to process nutrition data
   const processNutritionData = async (parsedData: any, imageUrl: string) => {
-    // Ensure all required fields are present
-    const defaultData = {
-      foodName: "Unknown Food",
-      calories: "N/A",
-      protein: "N/A",
-      carbs: "N/A",
-      fat: "N/A",
-      fiber: "N/A",
-      sugar: "N/A",
-      allergens: [],
-      additionalInfo: "Unable to determine additional information",
-      healthTips: "Consult a nutritionist for dietary advice",
-    };
+    try {
+      // Helper function to safely parse numeric values from strings
+      const parseNutrientValue = (value: string | undefined): number => {
+        if (!value) return 0;
+        if (typeof value === "number") return value;
+        if (typeof value !== "string") return 0;
 
-    // Merge with defaults to handle missing fields
-    const nutritionData = { ...defaultData, ...parsedData };
+        // Remove all non-numeric characters except dots and dashes
+        const cleanValue = value.replace(/[^0-9.-]/g, "");
 
-    // Extract numeric values for database storage
-    const numericValues = {
-      caloriesNum: parseInt(nutritionData.calories.replace(/[^0-9]/g, "")),
-      proteinNum: parseInt(nutritionData.protein.replace(/[^0-9]/g, "")),
-      carbsNum: parseInt(nutritionData.carbs.replace(/[^0-9]/g, "")),
-      fatNum: parseInt(nutritionData.fat.replace(/[^0-9]/g, "")),
-      fiberNum: parseInt(nutritionData.fiber.replace(/[^0-9]/g, "")),
-      sugarNum: parseInt(nutritionData.sugar.replace(/[^0-9]/g, "")),
-    };
+        if (cleanValue.includes("-")) {
+          const [min, max] = cleanValue
+            .split("-")
+            .map((num) => parseFloat(num));
+          return Math.floor((min + max) / 2); // Take average
+        }
 
-    setNutritionInfo(nutritionData);
+        const parsed = parseFloat(cleanValue);
+        return isNaN(parsed) ? 0 : parsed;
+      };
 
-    // Save the nutrition info to Firestore
-    if (userId) {
-      try {
-        const docRef = await addDoc(collection(db, "nutritionData"), {
-          userId,
-          imageUrl: imageUrl,
-          foodName: nutritionData.foodName,
-          calories: nutritionData.calories,
-          protein: nutritionData.protein,
-          carbs: nutritionData.carbs,
-          fat: nutritionData.fat,
-          fiber: nutritionData.fiber,
-          sugar: nutritionData.sugar,
-          // Numeric values for calculations and charts
-          caloriesNum: isNaN(numericValues.caloriesNum)
-            ? 0
-            : numericValues.caloriesNum,
-          proteinNum: isNaN(numericValues.proteinNum)
-            ? 0
-            : numericValues.proteinNum,
-          carbsNum: isNaN(numericValues.carbsNum) ? 0 : numericValues.carbsNum,
-          fatNum: isNaN(numericValues.fatNum) ? 0 : numericValues.fatNum,
-          fiberNum: isNaN(numericValues.fiberNum) ? 0 : numericValues.fiberNum,
-          sugarNum: isNaN(numericValues.sugarNum) ? 0 : numericValues.sugarNum,
-          // Other nutrition data
-          allergens: nutritionData.allergens || [],
-          additionalInfo: nutritionData.additionalInfo,
-          healthTips: nutritionData.healthTips,
-          personalizedRecommendation: nutritionData.personalizedRecommendation,
-          timestamp: serverTimestamp(),
-          scanDate: new Date().toISOString().split("T")[0], // YYYY-MM-DD format for easier grouping
-        });
-        console.log("Nutrition data saved with ID: ", docRef.id);
-      } catch (error) {
-        console.error("Error saving nutrition data:", error);
+      // Ensure all required fields exist with default values
+      const processedData = {
+        userId,
+        foodName: parsedData?.foodName || "Unknown Food",
+        calories: parsedData?.calories || "0 kcal",
+        caloriesNum: parseNutrientValue(parsedData?.calories),
+        protein: parsedData?.protein || "0g",
+        proteinNum: parseNutrientValue(parsedData?.protein),
+        carbs: parsedData?.carbs || "0g",
+        carbsNum: parseNutrientValue(parsedData?.carbs),
+        fat: parsedData?.fat || "0g",
+        fatNum: parseNutrientValue(parsedData?.fat),
+        fiber: parsedData?.fiber || "0g",
+        sugar: parsedData?.sugar || "0g",
+        imageUrl: imageUrl || "",
+        timestamp: serverTimestamp(),
+        scanDate: new Date().toISOString().split("T")[0],
+        ingredients: Array.isArray(parsedData?.ingredients)
+          ? parsedData.ingredients
+          : [],
+        allergens: Array.isArray(parsedData?.allergens)
+          ? parsedData.allergens
+          : [],
+        additionalInfo: parsedData?.additionalInfo || "",
+        healthTips: parsedData?.healthTips || "",
+        personalizedRecommendation:
+          parsedData?.personalizedRecommendation || "",
+        isConsumed: false,
+      };
+
+      console.log("Processed nutrition data:", {
+        foodName: processedData.foodName,
+        calories: processedData.calories,
+        caloriesNum: processedData.caloriesNum,
+        isConsumed: processedData.isConsumed,
+      });
+
+      // Save to Firestore and get the document reference
+      const docRef = await addDoc(
+        collection(db, "nutritionData"),
+        processedData
+      );
+
+      // Update local state with the document ID
+      setNutritionInfo({
+        ...processedData,
+        id: docRef.id,
+      });
+    } catch (error) {
+      console.error("Error saving nutrition data:", error);
+      throw error;
+    }
+  };
+
+  const handleEatingNow = async () => {
+    if (!nutritionInfo) {
+      Alert.alert("Error", "No food scan found");
+      return;
+    }
+
+    try {
+      // Get the latest document ID from Firestore
+      const scansQuery = query(
+        collection(db, "nutritionData"),
+        where("userId", "==", userId),
+        orderBy("timestamp", "desc"),
+        limit(1)
+      );
+
+      const scansSnapshot = await getDocs(scansQuery);
+      const latestScanDoc = scansSnapshot.docs[0];
+      const latestScanId = latestScanDoc?.id;
+
+      if (!latestScanId) {
+        Alert.alert("Error", "Could not find the food scan");
+        return;
       }
+
+      // Get the current data to preserve calorie information
+      const currentData = latestScanDoc.data();
+
+      console.log("Marking as consumed:", {
+        scanId: latestScanId,
+        calories: currentData.calories,
+        caloriesNum: currentData.caloriesNum,
+      });
+
+      // Update the document with consumed status and timestamp while preserving calorie data
+      await updateDoc(doc(db, "nutritionData", latestScanId), {
+        isConsumed: true,
+        consumedAt: serverTimestamp(),
+        calories: currentData.calories,
+        caloriesNum: currentData.caloriesNum,
+      });
+
+      // Update local state
+      setNutritionInfo((prev) =>
+        prev
+          ? {
+              ...prev,
+              isConsumed: true,
+            }
+          : null
+      );
+
+      Alert.alert("Success", "Food marked as consumed!", [
+        {
+          text: "OK",
+          onPress: () => {
+            // Navigate back to home with refresh parameter
+            router.push({
+              pathname: "/(tabs)",
+              params: {
+                refresh: "true",
+                timestamp: Date.now().toString(),
+              },
+            });
+          },
+        },
+      ]);
+    } catch (err) {
+      console.error("Error marking food as consumed:", err);
+      Alert.alert(
+        "Error",
+        "Failed to mark food as consumed. Please try again."
+      );
     }
   };
 
@@ -1060,50 +1157,119 @@ export default function ScanScreen() {
       <View style={styles.nutritionCard}>
         <Text style={styles.foodName}>{nutritionInfo.foodName}</Text>
 
-        <View style={styles.nutritionGrid}>
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{nutritionInfo.calories}</Text>
-            <Text style={styles.nutritionLabel}>Calories</Text>
+        {/* Main Nutrition Grid */}
+        <View style={styles.mainNutritionGrid}>
+          <View style={styles.mainNutritionItem}>
+            <Ionicons
+              name="flame-outline"
+              size={24}
+              color={Colors.light.primary}
+            />
+            <Text style={styles.mainNutritionValue}>
+              {nutritionInfo.calories}
+            </Text>
+            <Text style={styles.mainNutritionLabel}>Calories</Text>
           </View>
 
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{nutritionInfo.protein}</Text>
-            <Text style={styles.nutritionLabel}>Protein</Text>
+          <View style={styles.mainNutritionItem}>
+            <Ionicons name="barbell-outline" size={24} color="#4CAF50" />
+            <Text style={[styles.mainNutritionValue, { color: "#4CAF50" }]}>
+              {nutritionInfo.protein}
+            </Text>
+            <Text style={styles.mainNutritionLabel}>Protein</Text>
           </View>
 
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{nutritionInfo.carbs}</Text>
-            <Text style={styles.nutritionLabel}>Carbs</Text>
+          <View style={styles.mainNutritionItem}>
+            <Ionicons name="leaf-outline" size={24} color="#2196F3" />
+            <Text style={[styles.mainNutritionValue, { color: "#2196F3" }]}>
+              {nutritionInfo.carbs}
+            </Text>
+            <Text style={styles.mainNutritionLabel}>Carbs</Text>
           </View>
 
-          <View style={styles.nutritionItem}>
-            <Text style={styles.nutritionValue}>{nutritionInfo.fat}</Text>
-            <Text style={styles.nutritionLabel}>Fat</Text>
+          <View style={styles.mainNutritionItem}>
+            <Ionicons name="water-outline" size={24} color="#FF9800" />
+            <Text style={[styles.mainNutritionValue, { color: "#FF9800" }]}>
+              {nutritionInfo.fat}
+            </Text>
+            <Text style={styles.mainNutritionLabel}>Fat</Text>
           </View>
         </View>
 
-        <View style={styles.nutritionDetails}>
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionDetailLabel}>Fiber:</Text>
-            <Text style={styles.nutritionDetailValue}>
+        {/* Secondary Nutrition Details */}
+        <View style={styles.secondaryNutritionContainer}>
+          <View style={styles.secondaryNutritionItem}>
+            <View style={styles.secondaryNutritionHeader}>
+              <Ionicons name="nutrition-outline" size={20} color="#8BC34A" />
+              <Text style={styles.secondaryNutritionLabel}>Fiber</Text>
+            </View>
+            <Text
+              style={[styles.secondaryNutritionValue, { color: "#8BC34A" }]}
+            >
               {nutritionInfo.fiber}
             </Text>
           </View>
 
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionDetailLabel}>Sugar:</Text>
-            <Text style={styles.nutritionDetailValue}>
+          <View style={styles.secondaryNutritionItem}>
+            <View style={styles.secondaryNutritionHeader}>
+              <Ionicons name="cafe-outline" size={20} color="#FF5722" />
+              <Text style={styles.secondaryNutritionLabel}>Sugar</Text>
+            </View>
+            <Text
+              style={[styles.secondaryNutritionValue, { color: "#FF5722" }]}
+            >
               {nutritionInfo.sugar}
             </Text>
           </View>
         </View>
 
+        {/* Ingredients Section */}
+        {nutritionInfo.ingredients && nutritionInfo.ingredients.length > 0 && (
+          <View style={styles.infoSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons
+                name="list-outline"
+                size={24}
+                color={Colors.light.primary}
+              />
+              <Text style={styles.sectionTitle}>Ingredients</Text>
+            </View>
+            <View style={styles.ingredientsList}>
+              {nutritionInfo.ingredients.map((ingredient, index) => (
+                <View key={index} style={styles.ingredientItem}>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={16}
+                    color={Colors.light.primary}
+                  />
+                  <Text style={styles.ingredientText}>{ingredient}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Eating it now button */}
+        <TouchableOpacity style={styles.eatButton} onPress={handleEatingNow}>
+          <Ionicons
+            name="restaurant"
+            size={24}
+            color={Colors.light.background}
+          />
+          <Text style={styles.eatButtonText}>Eating it now</Text>
+        </TouchableOpacity>
+
+        {/* Allergens Section */}
         {nutritionInfo.allergens && nutritionInfo.allergens.length > 0 ? (
           <View style={styles.allergensSection}>
-            <Text style={styles.infoTitle}>Allergens</Text>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="warning-outline" size={24} color="#FF6B6B" />
+              <Text style={styles.sectionTitle}>Allergens</Text>
+            </View>
             <View style={styles.allergensTags}>
               {nutritionInfo.allergens.map((allergen, index) => (
                 <View key={index} style={styles.allergenTag}>
+                  <Ionicons name="alert-circle" size={16} color="#E65100" />
                   <Text style={styles.allergenText}>{allergen}</Text>
                 </View>
               ))}
@@ -1111,27 +1277,46 @@ export default function ScanScreen() {
           </View>
         ) : (
           <View style={styles.infoSection}>
-            <Text style={styles.infoTitle}>Allergens</Text>
+            <View style={styles.sectionHeader}>
+              <Ionicons
+                name="checkmark-circle-outline"
+                size={24}
+                color="#4CAF50"
+              />
+              <Text style={styles.sectionTitle}>Allergens</Text>
+            </View>
             <Text style={styles.infoText}>No common allergens detected</Text>
+          </View>
+        )}
+
+        {/* Additional Info Section */}
+        {nutritionInfo.additionalInfo && (
+          <View style={styles.infoSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons
+                name="information-circle-outline"
+                size={24}
+                color={Colors.light.primary}
+              />
+              <Text style={styles.sectionTitle}>Additional Info</Text>
+            </View>
+            <Text style={styles.infoText}>{nutritionInfo.additionalInfo}</Text>
+          </View>
+        )}
+
+        {/* Health Tips Section */}
+        {nutritionInfo.healthTips && (
+          <View style={styles.infoSection}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="fitness-outline" size={24} color="#4CAF50" />
+              <Text style={styles.sectionTitle}>Health Tips</Text>
+            </View>
+            <Text style={styles.infoText}>{nutritionInfo.healthTips}</Text>
           </View>
         )}
 
         {/* Render personalized recommendations */}
         {renderPersonalizedRecommendations()}
-
-        {nutritionInfo.additionalInfo && (
-          <View style={styles.infoSection}>
-            <Text style={styles.infoTitle}>Additional Info</Text>
-            <Text style={styles.infoText}>{nutritionInfo.additionalInfo}</Text>
-          </View>
-        )}
-
-        {nutritionInfo.healthTips && (
-          <View style={styles.infoSection}>
-            <Text style={styles.infoTitle}>Health Tips</Text>
-            <Text style={styles.infoText}>{nutritionInfo.healthTips}</Text>
-          </View>
-        )}
       </View>
     );
   };
@@ -1398,66 +1583,84 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: "center",
   },
-  nutritionGrid: {
+  mainNutritionGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 20,
+    marginTop: 10,
   },
-  nutritionItem: {
+  mainNutritionItem: {
     width: "48%",
     backgroundColor: Colors.light.surface,
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 10,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  nutritionValue: {
-    fontSize: 18,
+  mainNutritionValue: {
+    fontSize: 20,
     fontWeight: "bold",
     color: Colors.light.primary,
+    marginTop: 8,
   },
-  nutritionLabel: {
+  mainNutritionLabel: {
     fontSize: 14,
     color: Colors.light.textSecondary,
     marginTop: 4,
   },
-  nutritionDetails: {
-    marginBottom: 16,
-  },
-  nutritionRow: {
+  secondaryNutritionContainer: {
     flexDirection: "row",
     justifyContent: "space-between",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.light.border,
+    marginBottom: 20,
   },
-  nutritionDetailLabel: {
-    fontSize: 16,
-    color: Colors.light.text,
+  secondaryNutritionItem: {
+    width: "48%",
+    backgroundColor: Colors.light.surface,
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  nutritionDetailValue: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: Colors.light.text,
-  },
-  infoSection: {
-    marginTop: 12,
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    color: Colors.light.text,
+  secondaryNutritionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
     marginBottom: 8,
   },
-  infoText: {
+  secondaryNutritionLabel: {
     fontSize: 14,
     color: Colors.light.textSecondary,
-    lineHeight: 20,
+    marginLeft: 8,
+  },
+  secondaryNutritionValue: {
+    fontSize: 18,
+    fontWeight: "bold",
+    textAlign: "center",
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: Colors.light.text,
+    marginLeft: 8,
   },
   allergensSection: {
-    marginTop: 12,
-    marginBottom: 12,
+    backgroundColor: Colors.light.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
   },
   allergensTags: {
     flexDirection: "row",
@@ -1465,9 +1668,11 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   allergenTag: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFF3E0",
-    borderRadius: 16,
-    paddingVertical: 6,
+    borderRadius: 20,
+    paddingVertical: 8,
     paddingHorizontal: 12,
     marginRight: 8,
     marginBottom: 8,
@@ -1478,6 +1683,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#E65100",
     fontWeight: "500",
+    marginLeft: 6,
+  },
+  infoSection: {
+    backgroundColor: Colors.light.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+  },
+  infoText: {
+    fontSize: 14,
+    color: Colors.light.text,
+    lineHeight: 20,
   },
   personalizedSection: {
     marginTop: 16,
@@ -1521,17 +1738,39 @@ const styles = StyleSheet.create({
     color: Colors.light.textSecondary,
     textAlign: "center",
   },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: Colors.light.text,
-    marginBottom: 12,
-  },
   recommendationIcon: {
     marginRight: 8,
   },
   recommendationText: {
     fontSize: 14,
     color: Colors.light.text,
+  },
+  eatButton: {
+    backgroundColor: Colors.light.primary,
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 16,
+  },
+  eatButtonText: {
+    color: Colors.light.background,
+    fontSize: 18,
+    fontWeight: "600",
+    marginLeft: 8,
+  },
+  ingredientsList: {
+    marginTop: 8,
+  },
+  ingredientItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  ingredientText: {
+    fontSize: 14,
+    color: Colors.light.text,
+    marginLeft: 8,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import {
   StyleSheet,
   View,
@@ -9,98 +9,46 @@ import {
   ActivityIndicator,
   Alert,
   Share,
+  Platform,
 } from "react-native";
 import { Stack, useLocalSearchParams, router } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/Colors";
-import { doc, getDoc, deleteDoc } from "firebase/firestore";
-import { db } from "@/firebaseConfig";
 import { useAuth } from "@clerk/clerk-expo";
-
-type FoodDetail = {
-  id: string;
-  foodName: string;
-  calories: string;
-  caloriesNum: number;
-  protein: string;
-  proteinNum: number;
-  carbs: string;
-  carbsNum: number;
-  fat: string;
-  fatNum: number;
-  fiber: string;
-  sugar: string;
-  imageUrl: string;
-  timestamp: any;
-  scanDate: string;
-  allergens?: string[];
-  additionalInfo?: string;
-  healthTips?: string;
-  personalizedRecommendation?: string;
-};
+import {
+  useFoodDetail,
+  useMarkAsConsumed,
+  useDeleteScans,
+} from "@/hooks/useQueries";
 
 export default function FoodDetailScreen() {
   const { id } = useLocalSearchParams();
   const { userId } = useAuth();
-  const [food, setFood] = useState<FoodDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!id) {
-      setError("No food item ID provided");
-      setLoading(false);
-      return;
+  // Use TanStack Query hooks
+  const { data: foodDetail, isLoading, error } = useFoodDetail(id as string);
+  const markAsConsumed = useMarkAsConsumed();
+  const deleteMutation = useDeleteScans();
+
+  const handleMarkAsConsumed = async () => {
+    try {
+      await markAsConsumed.mutateAsync(id as string);
+      Alert.alert("Success", "Food marked as consumed!");
+      router.push("/(tabs)");
+    } catch (err) {
+      console.error("Error marking food as consumed:", err);
+      Alert.alert(
+        "Error",
+        "Failed to mark food as consumed. Please try again."
+      );
     }
-
-    const fetchFoodDetail = async () => {
-      try {
-        setLoading(true);
-        const docRef = doc(db, "nutritionData", id as string);
-        const docSnap = await getDoc(docRef);
-
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setFood({
-            id: docSnap.id,
-            foodName: data.foodName || "Unknown Food",
-            calories: data.calories || "0 kcal",
-            caloriesNum: data.caloriesNum || 0,
-            protein: data.protein || "0g",
-            proteinNum: data.proteinNum || 0,
-            carbs: data.carbs || "0g",
-            carbsNum: data.carbsNum || 0,
-            fat: data.fat || "0g",
-            fatNum: data.fatNum || 0,
-            fiber: data.fiber || "0g",
-            sugar: data.sugar || "0g",
-            imageUrl: data.imageUrl || "",
-            timestamp: data.timestamp,
-            scanDate: data.scanDate || "",
-            allergens: data.allergens || [],
-            additionalInfo: data.additionalInfo || "",
-            healthTips: data.healthTips || "",
-            personalizedRecommendation: data.personalizedRecommendation || "",
-          });
-        } else {
-          setError("Food item not found");
-        }
-      } catch (err) {
-        console.error("Error fetching food details:", err);
-        setError("Failed to load food details. Please try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchFoodDetail();
-  }, [id]);
+  };
 
   const handleDelete = () => {
     Alert.alert(
-      "Delete Food Entry",
-      "Are you sure you want to delete this food entry? This action cannot be undone.",
+      "Delete Food",
+      "Are you sure you want to delete this food scan?",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -108,14 +56,14 @@ export default function FoodDetailScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              await deleteDoc(doc(db, "nutritionData", id as string));
-              Alert.alert("Success", "Food entry has been deleted.");
+              await deleteMutation.mutateAsync([id as string]);
+              Alert.alert("Success", "Food scan deleted successfully");
               router.back();
             } catch (err) {
-              console.error("Error deleting food entry:", err);
+              console.error("Error deleting food scan:", err);
               Alert.alert(
                 "Error",
-                "Failed to delete food entry. Please try again."
+                "Failed to delete food scan. Please try again."
               );
             }
           },
@@ -125,192 +73,46 @@ export default function FoodDetailScreen() {
   };
 
   const handleShare = async () => {
-    if (!food) return;
+    if (!foodDetail) return;
 
     try {
-      const nutritionInfo = `
-Food: ${food.foodName}
-Calories: ${food.caloriesNum ? `${food.caloriesNum} kcal` : food.calories}
-Protein: ${food.proteinNum ? `${food.proteinNum}g` : food.protein}
-Carbs: ${food.carbsNum ? `${food.carbsNum}g` : food.carbs}
-Fat: ${food.fatNum ? `${food.fatNum}g` : food.fat}
-${food.fiber ? `Fiber: ${food.fiber}` : ""}
-${food.sugar ? `Sugar: ${food.sugar}` : ""}
-${
-  food.allergens && food.allergens.length > 0
-    ? `Allergens: ${food.allergens.join(", ")}`
-    : "No allergens detected"
-}
-      `;
-
+      const message = `Check out my food scan!\n\n${foodDetail.foodName}\n\nNutrition Info:\nCalories: ${foodDetail.calories}\nProtein: ${foodDetail.protein}\nCarbs: ${foodDetail.carbs}\nFat: ${foodDetail.fat}`;
       await Share.share({
-        message: `Check out the nutrition information I scanned with ScanBites!\n${nutritionInfo}`,
-        title: `ScanBites - ${food.foodName}`,
+        message,
       });
-    } catch (error) {
-      Alert.alert("Error", "Failed to share food details");
+    } catch (err) {
+      console.error("Error sharing food scan:", err);
+      Alert.alert("Error", "Failed to share food scan. Please try again.");
     }
   };
 
-  const renderNutritionSection = () => {
-    if (!food) return null;
-
-    return (
-      <View style={styles.nutritionSection}>
-        <Text style={styles.sectionTitle}>Nutrition Information</Text>
-
-        <View style={styles.macroContainer}>
-          <View style={styles.macroCircle}>
-            <Text style={styles.macroValue}>{food.caloriesNum}</Text>
-            <Text style={styles.macroLabel}>Calories</Text>
-          </View>
-
-          <View style={styles.nutritionBarContainer}>
-            <View style={styles.nutritionBar}>
-              <View
-                style={[
-                  styles.nutritionBarFill,
-                  {
-                    width: `${Math.min(
-                      (food.proteinNum /
-                        (food.proteinNum + food.carbsNum + food.fatNum)) *
-                        100,
-                      100
-                    )}%`,
-                    backgroundColor: "#4CAF50",
-                  },
-                ]}
-              />
-              <Text style={styles.nutritionBarLabel}>
-                Protein:{" "}
-                {food.proteinNum ? `${food.proteinNum}g` : food.protein}
-              </Text>
-            </View>
-
-            <View style={styles.nutritionBar}>
-              <View
-                style={[
-                  styles.nutritionBarFill,
-                  {
-                    width: `${Math.min(
-                      (food.carbsNum /
-                        (food.proteinNum + food.carbsNum + food.fatNum)) *
-                        100,
-                      100
-                    )}%`,
-                    backgroundColor: "#2196F3",
-                  },
-                ]}
-              />
-              <Text style={styles.nutritionBarLabel}>
-                Carbs: {food.carbsNum ? `${food.carbsNum}g` : food.carbs}
-              </Text>
-            </View>
-
-            <View style={styles.nutritionBar}>
-              <View
-                style={[
-                  styles.nutritionBarFill,
-                  {
-                    width: `${Math.min(
-                      (food.fatNum /
-                        (food.proteinNum + food.carbsNum + food.fatNum)) *
-                        100,
-                      100
-                    )}%`,
-                    backgroundColor: "#FF9800",
-                  },
-                ]}
-              />
-              <Text style={styles.nutritionBarLabel}>
-                Fat: {food.fatNum ? `${food.fatNum}g` : food.fat}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.additionalNutrition}>
-          {food.fiber && (
-            <View style={styles.nutritionItem}>
-              <Text style={styles.nutritionItemLabel}>Fiber</Text>
-              <Text style={styles.nutritionItemValue}>{food.fiber}</Text>
-            </View>
-          )}
-
-          {food.sugar && (
-            <View style={styles.nutritionItem}>
-              <Text style={styles.nutritionItemLabel}>Sugar</Text>
-              <Text style={styles.nutritionItemValue}>{food.sugar}</Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
-
-  const renderAllergensSection = () => {
-    if (!food || !food.allergens || food.allergens.length === 0) return null;
-
-    return (
-      <View style={styles.allergensSection}>
-        <Text style={styles.sectionTitle}>Allergens</Text>
-        <View style={styles.allergensTags}>
-          {food.allergens.map((allergen, index) => (
-            <View key={index} style={styles.allergenTag}>
-              <Text style={styles.allergenText}>{allergen}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    );
-  };
-
-  const renderHealthTipsSection = () => {
-    if (!food || !food.healthTips) return null;
-
-    return (
-      <View style={styles.tipsSection}>
-        <Text style={styles.sectionTitle}>Health Tips</Text>
-        <Text style={styles.tipsText}>{food.healthTips}</Text>
-      </View>
-    );
-  };
-
-  const renderPersonalizedSection = () => {
-    if (!food || !food.personalizedRecommendation) return null;
-
-    // Ensure recommendation is defined before calling split
-    const recommendations =
-      typeof food.personalizedRecommendation === "string"
-        ? food.personalizedRecommendation
-            .split("\n")
-            .filter((rec) => rec.trim().length > 0)
-        : [];
-
-    if (recommendations.length === 0) return null;
-
-    return (
-      <View style={styles.personalizedSection}>
-        <Text style={styles.sectionTitle}>Personalized Recommendations</Text>
-        {recommendations.map((rec, index) => (
-          <View key={index} style={styles.recommendationItem}>
-            <Ionicons
-              name="checkmark-circle"
-              size={20}
-              color={Colors.light.primary}
-              style={styles.recommendationIcon}
-            />
-            <Text style={styles.recommendationText}>{rec}</Text>
-          </View>
-        ))}
-      </View>
-    );
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ title: "" }} />
+        <Stack.Screen
+          options={{
+            title: "",
+            headerStyle: {
+              backgroundColor: "white",
+            },
+            headerShadowVisible: false,
+            headerLeft:
+              Platform.OS === "ios"
+                ? () => (
+                    <TouchableOpacity
+                      style={{ marginLeft: 8 }}
+                      onPress={() => router.back()}
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={24}
+                        color={Colors.light.primary}
+                      />
+                    </TouchableOpacity>
+                  )
+                : undefined,
+          }}
+        />
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.light.primary} />
           <Text style={styles.loadingText}>Loading food details...</Text>
@@ -319,10 +121,33 @@ ${
     );
   }
 
-  if (error || !food) {
+  if (error || !foodDetail) {
     return (
       <SafeAreaView style={styles.container}>
-        <Stack.Screen options={{ title: "" }} />
+        <Stack.Screen
+          options={{
+            title: "",
+            headerStyle: {
+              backgroundColor: "white",
+            },
+            headerShadowVisible: false,
+            headerLeft:
+              Platform.OS === "ios"
+                ? () => (
+                    <TouchableOpacity
+                      style={{ marginLeft: 8 }}
+                      onPress={() => router.back()}
+                    >
+                      <Ionicons
+                        name="chevron-back"
+                        size={24}
+                        color={Colors.light.primary}
+                      />
+                    </TouchableOpacity>
+                  )
+                : undefined,
+          }}
+        />
         <View style={styles.errorContainer}>
           <Ionicons
             name="alert-circle-outline"
@@ -330,13 +155,13 @@ ${
             color={Colors.light.error}
           />
           <Text style={styles.errorText}>
-            {error || "Unknown error occurred"}
+            Failed to load food details. Please try again.
           </Text>
           <TouchableOpacity
             style={styles.retryButton}
-            onPress={() => router.back()}
+            onPress={() => router.replace(`/(details)/food-detail?id=${id}`)}
           >
-            <Text style={styles.retryButtonText}>Go Back</Text>
+            <Text style={styles.retryButtonText}>Try Again</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -348,6 +173,25 @@ ${
       <Stack.Screen
         options={{
           title: "",
+          headerStyle: {
+            backgroundColor: "white",
+          },
+          headerShadowVisible: false,
+          headerLeft:
+            Platform.OS === "ios"
+              ? () => (
+                  <TouchableOpacity
+                    style={{ marginLeft: 8 }}
+                    onPress={() => router.back()}
+                  >
+                    <Ionicons
+                      name="chevron-back"
+                      size={24}
+                      color={Colors.light.primary}
+                    />
+                  </TouchableOpacity>
+                )
+              : undefined,
           headerRight: () => (
             <View style={styles.headerButtons}>
               <TouchableOpacity
@@ -375,57 +219,176 @@ ${
         }}
       />
 
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.content}
-      >
+      <ScrollView style={styles.scrollView}>
         <View style={styles.imageContainer}>
-          {food.imageUrl ? (
+          {foodDetail.imageUrl ? (
             <Image
-              source={{ uri: food.imageUrl }}
+              source={{ uri: foodDetail.imageUrl }}
               style={styles.foodImage}
               resizeMode="cover"
             />
           ) : (
-            <View style={styles.imagePlaceholder}>
+            <View style={styles.placeholderImage}>
               <Ionicons
-                name="restaurant"
-                size={64}
+                name="restaurant-outline"
+                size={48}
                 color={Colors.light.primary}
               />
             </View>
           )}
         </View>
 
-        <View style={styles.foodHeader}>
-          <Text style={styles.foodName}>{food.foodName}</Text>
+        <View style={styles.contentContainer}>
+          <Text style={styles.foodName}>{foodDetail.foodName}</Text>
           <Text style={styles.scanDate}>
-            Scanned on{" "}
-            {food.timestamp
-              ? new Date(food.timestamp.toDate()).toLocaleString()
+            {foodDetail.timestamp
+              ? new Date(foodDetail.timestamp.toDate()).toLocaleString()
               : "Unknown date"}
           </Text>
-        </View>
 
-        {renderNutritionSection()}
-        {renderAllergensSection()}
-        {renderHealthTipsSection()}
-        {renderPersonalizedSection()}
-
-        {food.additionalInfo && (
-          <View style={styles.additionalInfoSection}>
-            <Text style={styles.sectionTitle}>Additional Information</Text>
-            <Text style={styles.additionalInfoText}>{food.additionalInfo}</Text>
+          <View style={styles.nutritionGrid}>
+            <View style={styles.nutritionItem}>
+              <Ionicons
+                name="flame-outline"
+                size={24}
+                color={Colors.light.primary}
+              />
+              <Text style={styles.nutritionValue}>{foodDetail.calories}</Text>
+              <Text style={styles.nutritionLabel}>Calories</Text>
+            </View>
+            <View style={styles.nutritionItem}>
+              <Ionicons name="barbell-outline" size={24} color="#4CAF50" />
+              <Text style={[styles.nutritionValue, { color: "#4CAF50" }]}>
+                {foodDetail.protein}
+              </Text>
+              <Text style={styles.nutritionLabel}>Protein</Text>
+            </View>
+            <View style={styles.nutritionItem}>
+              <Ionicons name="leaf-outline" size={24} color="#2196F3" />
+              <Text style={[styles.nutritionValue, { color: "#2196F3" }]}>
+                {foodDetail.carbs}
+              </Text>
+              <Text style={styles.nutritionLabel}>Carbs</Text>
+            </View>
+            <View style={styles.nutritionItem}>
+              <Ionicons name="water-outline" size={24} color="#FF9800" />
+              <Text style={[styles.nutritionValue, { color: "#FF9800" }]}>
+                {foodDetail.fat}
+              </Text>
+              <Text style={styles.nutritionLabel}>Fat</Text>
+            </View>
           </View>
-        )}
 
-        <TouchableOpacity
-          style={styles.scanAgainButton}
-          onPress={() => router.push("/(tabs)/scan")}
-        >
-          <Text style={styles.scanAgainButtonText}>Scan Another Food</Text>
-        </TouchableOpacity>
+          {foodDetail.allergens && foodDetail.allergens.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="warning-outline" size={24} color="#FF6B6B" />
+                <Text style={styles.sectionTitle}>Allergens</Text>
+              </View>
+              <View style={styles.allergensTags}>
+                {foodDetail.allergens.map((allergen, index) => (
+                  <View key={index} style={styles.allergenTag}>
+                    <Ionicons name="alert-circle" size={16} color="#E65100" />
+                    <Text style={styles.allergenText}>{allergen}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {foodDetail.ingredients && foodDetail.ingredients.length > 0 && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons
+                  name="list-outline"
+                  size={24}
+                  color={Colors.light.primary}
+                />
+                <Text style={styles.sectionTitle}>Ingredients</Text>
+              </View>
+              <View style={styles.ingredientsList}>
+                {foodDetail.ingredients.map((ingredient, index) => (
+                  <View key={index} style={styles.ingredientItem}>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color={Colors.light.primary}
+                    />
+                    <Text style={styles.ingredientText}>{ingredient}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
+          {foodDetail.additionalInfo && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons
+                  name="information-circle-outline"
+                  size={24}
+                  color={Colors.light.primary}
+                />
+                <Text style={styles.sectionTitle}>Additional Information</Text>
+              </View>
+              <Text style={styles.sectionText}>
+                {foodDetail.additionalInfo}
+              </Text>
+            </View>
+          )}
+
+          {foodDetail.healthTips && (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Ionicons name="fitness-outline" size={24} color="#4CAF50" />
+                <Text style={styles.sectionTitle}>Health Tips</Text>
+              </View>
+              <Text style={styles.sectionText}>{foodDetail.healthTips}</Text>
+            </View>
+          )}
+
+          {foodDetail.personalizedRecommendation && (
+            <View
+              style={[
+                styles.section,
+                {
+                  backgroundColor: "#E8F5E9",
+                  borderLeftWidth: 4,
+                  borderLeftColor: Colors.light.primary,
+                },
+              ]}
+            >
+              <View style={styles.sectionHeader}>
+                <Ionicons
+                  name="person-outline"
+                  size={24}
+                  color={Colors.light.primary}
+                />
+                <Text style={styles.sectionTitle}>
+                  Personalized Recommendation
+                </Text>
+              </View>
+              <Text style={styles.sectionText}>
+                {foodDetail.personalizedRecommendation}
+              </Text>
+            </View>
+          )}
+        </View>
       </ScrollView>
+
+      {!foodDetail.isConsumed && (
+        <TouchableOpacity
+          style={styles.consumeButton}
+          onPress={handleMarkAsConsumed}
+        >
+          <Ionicons
+            name="restaurant"
+            size={24}
+            color={Colors.light.background}
+          />
+          <Text style={styles.consumeButtonText}>Eating it now</Text>
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 }
@@ -433,7 +396,7 @@ ${
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#f8f8f8",
+    backgroundColor: Colors.light.surface,
   },
   loadingContainer: {
     flex: 1,
@@ -462,244 +425,185 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.light.primary,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   retryButtonText: {
     color: "white",
+    fontSize: 16,
     fontWeight: "600",
   },
   scrollView: {
     flex: 1,
   },
-  content: {
-    paddingBottom: 40,
-  },
-  headerButtons: {
-    flexDirection: "row",
-  },
-  headerButton: {
-    marginLeft: 16,
-  },
   imageContainer: {
     width: "100%",
-    height: 200,
+    height: 300,
     backgroundColor: "#eee",
   },
   foodImage: {
     width: "100%",
     height: "100%",
   },
-  imagePlaceholder: {
+  placeholderImage: {
     width: "100%",
     height: "100%",
     backgroundColor: "#f0f0f0",
     justifyContent: "center",
     alignItems: "center",
   },
-  foodHeader: {
+  contentContainer: {
     padding: 16,
-    backgroundColor: "white",
-    borderBottomWidth: 1,
-    borderBottomColor: "#eee",
+    backgroundColor: Colors.light.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    marginTop: -24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 8,
   },
   foodName: {
     fontSize: 24,
     fontWeight: "bold",
     color: Colors.light.text,
     marginBottom: 8,
+    textAlign: "center",
   },
   scanDate: {
     fontSize: 14,
     color: Colors.light.textSecondary,
+    marginBottom: 24,
+    textAlign: "center",
+  },
+  nutritionGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "space-between",
+    marginBottom: 24,
+  },
+  nutritionItem: {
+    width: "48%",
+    backgroundColor: Colors.light.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    alignItems: "center",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  nutritionLabel: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    marginBottom: 8,
+  },
+  nutritionValue: {
+    fontSize: 20,
+    fontWeight: "bold",
+    color: Colors.light.primary,
+  },
+  section: {
+    backgroundColor: Colors.light.surface,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: Colors.light.text,
-    marginBottom: 12,
-  },
-  nutritionSection: {
-    padding: 16,
-    backgroundColor: "white",
-    marginTop: 12,
-    borderRadius: 8,
-    marginHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  macroContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  macroCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: Colors.light.primary,
-    justifyContent: "center",
-    alignItems: "center",
-    marginRight: 16,
-  },
-  macroValue: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "white",
-  },
-  macroLabel: {
-    fontSize: 12,
-    color: "white",
-  },
-  nutritionBarContainer: {
-    flex: 1,
-  },
-  nutritionBar: {
-    height: 22,
-    backgroundColor: "#e0e0e0",
-    borderRadius: 4,
-    marginBottom: 8,
-    overflow: "hidden",
-    position: "relative",
-  },
-  nutritionBarFill: {
-    height: "100%",
-    position: "absolute",
-    left: 0,
-    top: 0,
-  },
-  nutritionBarLabel: {
-    fontSize: 12,
-    color: "black",
-    position: "absolute",
-    left: 8,
-    top: 3,
-    fontWeight: "500",
-  },
-  additionalNutrition: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    marginTop: 8,
-  },
-  nutritionItem: {
-    width: "50%",
-    paddingVertical: 8,
-  },
-  nutritionItemLabel: {
-    fontSize: 12,
-    color: Colors.light.textSecondary,
-    marginBottom: 4,
-  },
-  nutritionItemValue: {
-    fontSize: 16,
     fontWeight: "600",
     color: Colors.light.text,
+    marginLeft: 8,
   },
-  allergensSection: {
-    padding: 16,
-    backgroundColor: "white",
-    marginTop: 12,
-    borderRadius: 8,
-    marginHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+  sectionText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: Colors.light.text,
   },
   allergensTags: {
     flexDirection: "row",
     flexWrap: "wrap",
+    marginTop: 8,
   },
   allergenTag: {
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: "#FFF3E0",
-    borderRadius: 16,
+    borderRadius: 20,
+    paddingVertical: 8,
     paddingHorizontal: 12,
-    paddingVertical: 6,
     marginRight: 8,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: "#FFB74D",
   },
   allergenText: {
+    fontSize: 14,
     color: "#E65100",
     fontWeight: "500",
-    fontSize: 12,
+    marginLeft: 4,
   },
-  tipsSection: {
-    padding: 16,
-    backgroundColor: "white",
-    marginTop: 12,
-    borderRadius: 8,
-    marginHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+  ingredientsList: {
+    marginTop: 8,
   },
-  tipsText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: Colors.light.text,
-  },
-  personalizedSection: {
-    padding: 16,
-    backgroundColor: "white",
-    marginTop: 12,
-    borderRadius: 8,
-    marginHorizontal: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  recommendationItem: {
+  ingredientItem: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    alignItems: "center",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
   },
-  recommendationIcon: {
-    marginRight: 8,
-    marginTop: 2,
-  },
-  recommendationText: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
+  ingredientText: {
+    fontSize: 16,
     color: Colors.light.text,
+    marginLeft: 12,
+    flex: 1,
   },
-  additionalInfoSection: {
-    padding: 16,
-    backgroundColor: "white",
-    marginTop: 12,
-    borderRadius: 8,
+  consumeButton: {
+    backgroundColor: Colors.light.primary,
+    borderRadius: 12,
+    paddingVertical: 16,
     marginHorizontal: 16,
+    marginVertical: 24,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
-  additionalInfoText: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: Colors.light.text,
+  consumeButtonText: {
+    color: "white",
+    fontSize: 18,
+    fontWeight: "600",
+    marginLeft: 8,
   },
-  scanAgainButton: {
-    backgroundColor: Colors.light.primary,
-    borderRadius: 8,
-    paddingVertical: 12,
-    marginHorizontal: 16,
-    marginTop: 24,
+  headerButtons: {
+    flexDirection: "row",
     alignItems: "center",
   },
-  scanAgainButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "600",
+  headerButton: {
+    marginLeft: 16,
+    padding: 8,
+    borderRadius: 8,
   },
 });

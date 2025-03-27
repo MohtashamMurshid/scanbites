@@ -5,9 +5,6 @@ export default function DetailsLayout() {
   return (
     <Stack
       screenOptions={{
-        headerStyle: {
-          backgroundColor: Colors.light.background,
-        },
         headerShadowVisible: false,
         headerTintColor: Colors.light.primary,
         headerTitleStyle: {
