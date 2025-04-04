@@ -947,6 +947,81 @@ export default function ScanScreen() {
         return isNaN(parsed) ? 0 : parsed;
       };
 
+      // Get user's dietary info
+      const { allergies, dietaryRestrictions } = extractDietaryInfo();
+
+      // Check for allergen alerts
+      const foodAllergens = parsedData.allergens || [];
+      const matchingAllergens = foodAllergens.filter((allergen: string) =>
+        allergies.some((userAllergy) =>
+          allergen.toLowerCase().includes(userAllergy.toLowerCase())
+        )
+      );
+
+      // Check for dietary restriction conflicts
+      const ingredients = parsedData.ingredients || [];
+      const dietaryConflicts = [];
+
+      if (dietaryRestrictions.includes("Vegetarian")) {
+        const meatIngredients = ingredients.filter((ingredient: string) =>
+          /beef|chicken|pork|meat|fish|seafood/i.test(ingredient)
+        );
+        if (meatIngredients.length > 0) {
+          dietaryConflicts.push("Contains meat products (not vegetarian)");
+        }
+      }
+
+      if (dietaryRestrictions.includes("Vegan")) {
+        const animalProducts = ingredients.filter((ingredient: string) =>
+          /milk|cheese|egg|honey|meat|fish|seafood/i.test(ingredient)
+        );
+        if (animalProducts.length > 0) {
+          dietaryConflicts.push("Contains animal products (not vegan)");
+        }
+      }
+
+      if (dietaryRestrictions.includes("Gluten-Free")) {
+        const glutenIngredients = ingredients.filter((ingredient: string) =>
+          /wheat|barley|rye|gluten/i.test(ingredient)
+        );
+        if (glutenIngredients.length > 0) {
+          dietaryConflicts.push("Contains gluten");
+        }
+      }
+
+      // Show immediate alert if there are any allergens or dietary conflicts
+      if (matchingAllergens.length > 0 || dietaryConflicts.length > 0) {
+        let alertMessage = "";
+
+        if (matchingAllergens.length > 0) {
+          alertMessage += `⚠️ ALLERGEN ALERT: This food contains ${matchingAllergens.join(
+            ", "
+          )}.\n\n`;
+        }
+
+        if (dietaryConflicts.length > 0) {
+          alertMessage += `DIETARY CONFLICTS:\n${dietaryConflicts.join("\n")}`;
+        }
+
+        Alert.alert(
+          "Important Health Alert",
+          alertMessage,
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+              onPress: () => console.log("Alert dismissed"),
+            },
+            {
+              text: "Continue Anyway",
+              style: "destructive",
+              onPress: () => console.log("User chose to continue"),
+            },
+          ],
+          { cancelable: false }
+        );
+      }
+
       // Ensure all required fields exist with default values
       const processedData = {
         userId,
@@ -975,6 +1050,9 @@ export default function ScanScreen() {
         personalizedRecommendation:
           parsedData?.personalizedRecommendation || "",
         isConsumed: false,
+        // Add dietary conflict information
+        dietaryConflicts: dietaryConflicts,
+        allergenConflicts: matchingAllergens,
       };
 
       console.log("Processed nutrition data:", {
