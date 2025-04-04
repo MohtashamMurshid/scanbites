@@ -246,35 +246,130 @@ export default function NutritionScreen() {
     return R * c; // Distance in meters
   }
 
-  // Generate meal suggestions based on remaining daily targets
+  // Generate meal suggestions based on remaining daily targets and user preferences
   useEffect(() => {
     if (consumedScans.length > 0) {
       const remainingCalories =
         dailyTargets.calories - nutritionStats.todayCalories;
       const remainingProtein =
         dailyTargets.protein - nutritionStats.todayProtein;
+      const remainingCarbs = dailyTargets.carbs - nutritionStats.todayCarbs;
+      const remainingFat = dailyTargets.fat - nutritionStats.todayFat;
 
-      // Update meal suggestions based on remaining nutrients
-      setMealSuggestions([
-        {
-          id: "1",
-          name: "Grilled Chicken Salad",
-          calories: Math.min(400, remainingCalories),
-          protein: Math.min(25, remainingProtein),
+      // Calculate percentage of daily targets met
+      const proteinPercentage =
+        (nutritionStats.todayProtein / dailyTargets.protein) * 100;
+      const carbsPercentage =
+        (nutritionStats.todayCarbs / dailyTargets.carbs) * 100;
+      const fatPercentage = (nutritionStats.todayFat / dailyTargets.fat) * 100;
+
+      // Determine which nutrients need focus
+      const needsProtein = proteinPercentage < 70;
+      const needsCarbs = carbsPercentage < 70;
+      const needsFat = fatPercentage < 70;
+      const caloriesExceeded = remainingCalories <= 0;
+
+      // Generate appropriate meal suggestions
+      const suggestions: MealSuggestion[] = [];
+
+      if (!caloriesExceeded) {
+        if (needsProtein) {
+          suggestions.push({
+            id: "1",
+            name: "Grilled Chicken Salad",
+            calories: Math.min(400, remainingCalories),
+            protein: Math.min(25, remainingProtein),
+            carbs: Math.min(15, remainingCarbs),
+            fat: Math.min(12, remainingFat),
+            tags: ["high-protein", "low-carb"],
+          });
+
+          suggestions.push({
+            id: "2",
+            name: "Greek Yogurt Parfait",
+            calories: Math.min(300, remainingCalories),
+            protein: Math.min(20, remainingProtein),
+            carbs: Math.min(30, remainingCarbs),
+            fat: Math.min(8, remainingFat),
+            tags: ["high-protein", "snack"],
+          });
+        }
+
+        if (needsCarbs && !needsProtein) {
+          suggestions.push({
+            id: "3",
+            name: "Quinoa Buddha Bowl",
+            calories: Math.min(450, remainingCalories),
+            protein: Math.min(12, remainingProtein),
+            carbs: Math.min(45, remainingCarbs),
+            fat: Math.min(15, remainingFat),
+            tags: ["balanced", "vegetarian"],
+          });
+        }
+
+        if (needsFat && !caloriesExceeded) {
+          suggestions.push({
+            id: "4",
+            name: "Avocado Toast",
+            calories: Math.min(350, remainingCalories),
+            protein: Math.min(10, remainingProtein),
+            carbs: Math.min(25, remainingCarbs),
+            fat: Math.min(18, remainingFat),
+            tags: ["healthy-fats", "breakfast"],
+          });
+        }
+
+        // Add a balanced option if no specific needs
+        if (!needsProtein && !needsCarbs && !needsFat) {
+          suggestions.push({
+            id: "5",
+            name: "Mediterranean Bowl",
+            calories: Math.min(500, remainingCalories),
+            protein: Math.min(15, remainingProtein),
+            carbs: Math.min(35, remainingCarbs),
+            fat: Math.min(20, remainingFat),
+            tags: ["balanced", "healthy"],
+          });
+        }
+      }
+
+      // If calories exceeded, suggest low-calorie options
+      if (caloriesExceeded) {
+        suggestions.push({
+          id: "6",
+          name: "Green Salad",
+          calories: 150,
+          protein: 5,
+          carbs: 10,
+          fat: 8,
+          tags: ["low-calorie", "light"],
+        });
+
+        suggestions.push({
+          id: "7",
+          name: "Vegetable Soup",
+          calories: 120,
+          protein: 4,
           carbs: 15,
-          fat: 12,
-          tags: ["high-protein", "low-carb"],
-        },
-        {
-          id: "2",
-          name: "Quinoa Buddha Bowl",
-          calories: Math.min(450, remainingCalories),
-          protein: Math.min(18, remainingProtein),
-          carbs: 45,
-          fat: 15,
-          tags: ["vegetarian", "balanced"],
-        },
-      ]);
+          fat: 5,
+          tags: ["low-calorie", "light"],
+        });
+      }
+
+      // If no suggestions were added (edge case), add a default balanced option
+      if (suggestions.length === 0) {
+        suggestions.push({
+          id: "8",
+          name: "Mixed Green Salad",
+          calories: 200,
+          protein: 8,
+          carbs: 20,
+          fat: 10,
+          tags: ["balanced", "light"],
+        });
+      }
+
+      setMealSuggestions(suggestions);
     }
   }, [consumedScans, nutritionStats, dailyTargets]);
 
