@@ -508,7 +508,7 @@ export default function ScanScreen() {
 
       systemContent +=
         "\n\nYour response should be a well-structured JSON object with the following fields:" +
-        "\n- foodName: Name of the food" +
+        "\n- foodName: Name of the food(Consise and to the point)" +
         "\n- calories: Calorie content with units just numbers" +
         "\n- protein: Protein content with units just numbers" +
         "\n- carbs: Carbohydrate content with units just numbers" +
