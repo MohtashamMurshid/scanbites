@@ -27,24 +27,60 @@ export default function SignUpScreen() {
   const onSignUpPress = async () => {
     if (!isLoaded) return;
 
+    // 1. Front‐end validation: ensure both fields are filled
+    if (!emailAddress.trim() || !password) {
+      Alert.alert("Missing Fields", "Please enter both email and password.");
+      return;
+    }
+
     try {
+      // 2. Attempt to create the user
       await signUp.create({
         emailAddress,
         password,
       });
 
+      // 3. Prepare email‐code verification
       await signUp.prepareEmailAddressVerification({ strategy: "email_code" });
       setPendingVerification(true);
-    } catch (err) {
-      console.error(JSON.stringify(err, null, 2));
-      Alert.alert("Error", "Failed to create account");
+    } catch (err: any) {
+      // 4. Gather all Clerk errors (if available) or show fallback
+      const messages: string[] = [];
+
+      if (Array.isArray(err.errors)) {
+        for (const e of err.errors) {
+          if (e.longMessage) {
+            messages.push(e.longMessage);
+          } else if (e.message) {
+            messages.push(e.message);
+          }
+        }
+      }
+
+      if (messages.length === 0 && err.message) {
+        messages.push(err.message);
+      }
+
+      if (messages.length === 0) {
+        messages.push("Failed to create account. Please try again.");
+      }
+
+      Alert.alert("Sign-Up Error", messages.join("\n"));
+      console.error("Clerk SignUp Error:", JSON.stringify(err, null, 2));
     }
   };
 
   const onVerifyPress = async () => {
     if (!isLoaded) return;
 
+    // 1. Ensure user entered a code before submitting
+    if (!code.trim()) {
+      Alert.alert("Missing Code", "Please enter the verification code.");
+      return;
+    }
+
     try {
+      // 2. Attempt verification
       const signUpAttempt = await signUp.attemptEmailAddressVerification({
         code,
       });
@@ -53,22 +89,57 @@ export default function SignUpScreen() {
         await setActive({ session: signUpAttempt.createdSessionId });
         router.replace("/(onboarding)/health-questionnaire");
       } else {
-        Alert.alert(
-          "Verification Failed",
-          "Please try entering the code again"
-        );
-        console.error(JSON.stringify(signUpAttempt, null, 2));
+        // 3. status !== "complete": collect Clerk‐provided errors (if any)
+        const messages: string[] = [];
+
+        if (Array.isArray((signUpAttempt as any).errors)) {
+          for (const e of (signUpAttempt as any).errors) {
+            if (e.longMessage) {
+              messages.push(e.longMessage);
+            } else if (e.message) {
+              messages.push(e.message);
+            }
+          }
+        }
+
+        if (messages.length === 0) {
+          messages.push("Verification failed. Please check your code and try again.");
+        }
+
+        Alert.alert("Verification Error", messages.join("\n"));
+        console.error("Clerk Verification Error:", JSON.stringify(signUpAttempt, null, 2));
       }
-    } catch (err) {
-      Alert.alert("Error", "Invalid verification code");
-      console.error(JSON.stringify(err, null, 2));
+    } catch (err: any) {
+      // 4. Catch unexpected exceptions and show all messages
+      const messages: string[] = [];
+
+      if (Array.isArray(err.errors)) {
+        for (const e of err.errors) {
+          if (e.longMessage) {
+            messages.push(e.longMessage);
+          } else if (e.message) {
+            messages.push(e.message);
+          }
+        }
+      }
+
+      if (messages.length === 0 && err.message) {
+        messages.push(err.message);
+      }
+
+      if (messages.length === 0) {
+        messages.push("Invalid verification code. Please try again.");
+      }
+
+      Alert.alert("Error", messages.join("\n"));
+      console.error("Clerk Verification Exception:", JSON.stringify(err, null, 2));
     }
   };
 
   if (pendingVerification) {
     return (
       <SafeAreaView style={styles.container}>
-        <CustomHeader title="Verify Email" />
+        <CustomHeader title="Verify Email" showBackButton />
         <KeyboardAvoidingView
           behavior={Platform.OS === "ios" ? "padding" : "height"}
           style={styles.keyboardView}
@@ -85,7 +156,7 @@ export default function SignUpScreen() {
                 value={code}
                 placeholder="Enter verification code"
                 placeholderTextColor={Colors.light.textSecondary}
-                onChangeText={(code) => setCode(code)}
+                onChangeText={setCode}
                 keyboardType="number-pad"
                 autoComplete="one-time-code"
               />
@@ -102,7 +173,7 @@ export default function SignUpScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <CustomHeader title="Sign Up" />
+      <CustomHeader title="Sign Up" showBackButton={false} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={styles.keyboardView}
@@ -118,7 +189,7 @@ export default function SignUpScreen() {
               value={emailAddress}
               placeholder="Enter email"
               placeholderTextColor={Colors.light.textSecondary}
-              onChangeText={(email) => setEmailAddress(email)}
+              onChangeText={setEmailAddress}
               keyboardType="email-address"
             />
             <TextInput
@@ -127,7 +198,7 @@ export default function SignUpScreen() {
               placeholder="Enter password"
               placeholderTextColor={Colors.light.textSecondary}
               secureTextEntry={true}
-              onChangeText={(password) => setPassword(password)}
+              onChangeText={setPassword}
             />
 
             <TouchableOpacity style={styles.button} onPress={onSignUpPress}>

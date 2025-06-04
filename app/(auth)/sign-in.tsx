@@ -22,35 +22,72 @@ export default function Page() {
   const [emailAddress, setEmailAddress] = React.useState("");
   const [password, setPassword] = React.useState("");
 
-  // Handle the submission of the sign-in form
   const onSignInPress = React.useCallback(async () => {
     if (!isLoaded) return;
 
-    // Start the sign-in process using the email and password provided
+    // Basic front-end check: ensure fields are not empty
+    if (!emailAddress.trim() || !password) {
+      Alert.alert("Missing Fields", "Please enter both email and password.");
+      return;
+    }
+
     try {
       const signInAttempt = await signIn.create({
         identifier: emailAddress,
         password,
       });
 
-      // If sign-in process is complete, set the created session as active
-      // and redirect the user
       if (signInAttempt.status === "complete") {
         await setActive({ session: signInAttempt.createdSessionId });
         router.replace("/");
       } else {
-        // If the status isn't complete, check why. User might need to
-        // complete further steps.
-        Alert.alert("Error", "Invalid email or password");
-        console.error(JSON.stringify(signInAttempt, null, 2));
+        // If Clerk did not immediately complete the flow, try to extract any messages
+        const messages: string[] = [];
+
+        // Sometimes Clerk returns an `errors` array inside `signInAttempt`
+        if (Array.isArray((signInAttempt as any).errors)) {
+          for (const e of (signInAttempt as any).errors) {
+            if (e.longMessage) {
+              messages.push(e.longMessage);
+            } else if (e.message) {
+              messages.push(e.message);
+            }
+          }
+        }
+
+        // Fallback to a generic message if none were provided
+        if (messages.length === 0) {
+          messages.push("Invalid email or password.");
+        }
+
+        Alert.alert("Sign-In Error", messages.join("\n"));
+        console.error("SignInAttempt:", JSON.stringify(signInAttempt, null, 2));
       }
-    } catch (err) {
-      // See https://clerk.com/docs/custom-flows/error-handling
-      // for more info on error handling
-      Alert.alert("Error", "Invalid email or password");
-      console.error(JSON.stringify(err, null, 2));
+    } catch (err: any) {
+      // Clerk usually throws a ClerkAPIResponseError, which contains an `errors` array
+      const messages: string[] = [];
+
+      if (Array.isArray(err.errors)) {
+        for (const e of err.errors) {
+          if (e.longMessage) {
+            messages.push(e.longMessage);
+          } else if (e.message) {
+            messages.push(e.message);
+          }
+        }
+      } else if (err.message) {
+        // Fallback to err.message if no structured `errors` array exists
+        messages.push(err.message);
+      }
+
+      if (messages.length === 0) {
+        messages.push("An unexpected error occurred.");
+      }
+
+      Alert.alert("Error", messages.join("\n"));
+      console.error("ClerkError:", JSON.stringify(err, null, 2));
     }
-  }, [isLoaded, emailAddress, password]);
+  }, [isLoaded, emailAddress, password, router, setActive, signIn]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -67,10 +104,11 @@ export default function Page() {
             <TextInput
               style={styles.input}
               autoCapitalize="none"
+              keyboardType="email-address"
               value={emailAddress}
               placeholder="Enter email"
               placeholderTextColor={Colors.light.textSecondary}
-              onChangeText={(emailAddress) => setEmailAddress(emailAddress)}
+              onChangeText={setEmailAddress}
             />
             <TextInput
               style={styles.input}
@@ -78,7 +116,7 @@ export default function Page() {
               placeholder="Enter password"
               placeholderTextColor={Colors.light.textSecondary}
               secureTextEntry={true}
-              onChangeText={(password) => setPassword(password)}
+              onChangeText={setPassword}
             />
 
             <TouchableOpacity style={styles.button} onPress={onSignInPress}>
