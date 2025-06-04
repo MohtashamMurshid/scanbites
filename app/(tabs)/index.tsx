@@ -87,7 +87,12 @@ type DietaryAlert = {
 export default function HomeScreen() {
   const router = useRouter();
   const { userId, isLoaded } = useAuth();
+
+  // Pull out only the two params we care about
   const params = useLocalSearchParams();
+  const refresh = params.refresh as string | undefined;
+  const calorieTargetParam = params.calorieTarget as string | undefined;
+
   const [userName, setUserName] = useState("User");
   const [recentScans, setRecentScans] = useState<ScanHistory[]>([]);
   const [calorieData, setCalorieData] = useState<CalorieData[]>([]);
@@ -252,7 +257,6 @@ export default function HomeScreen() {
     try {
       setIsLoading(true);
       setError(null);
-      console.log("Fetching user data...");
 
       // Fetch user preferences first
       await fetchUserPreferences();
@@ -265,7 +269,6 @@ export default function HomeScreen() {
       );
 
       const scansSnapshot = await getDocs(scansQuery);
-      console.log("Retrieved scans:", scansSnapshot.size);
       const scansData: ScanHistory[] = [];
 
       scansSnapshot.forEach((doc) => {
@@ -299,7 +302,7 @@ export default function HomeScreen() {
         return b.timestamp.toMillis() - a.timestamp.toMillis();
       });
 
-      // Calculate daily calories before setting state
+      // Calculate today's total
       const today = new Date().toISOString().split("T")[0];
       const todayScans = scansData.filter(
         (scan) => scan.scanDate === today && scan.isConsumed === true
@@ -308,12 +311,6 @@ export default function HomeScreen() {
         (sum, scan) => sum + (scan.caloriesNum || 0),
         0
       );
-
-      console.log("Today's scans:", {
-        total: todayTotal,
-        scansCount: todayScans.length,
-        consumedScans: todayScans.filter((s) => s.isConsumed).length,
-      });
 
       // Update all states at once to ensure consistency
       setRecentScans(sortedScans.slice(0, 10));
@@ -335,19 +332,20 @@ export default function HomeScreen() {
     }
   }, [userId, isLoaded]);
 
-  // Effect for handling refresh and calorie target updates
+  // -------- FIXED useEffect: only depend on refresh & calorieTargetParam --------
   useEffect(() => {
-    if (params.refresh) {
+    if (refresh) {
       fetchUserData();
     }
 
-    if (params.calorieTarget) {
-      const newTarget = parseInt(params.calorieTarget as string);
+    if (calorieTargetParam) {
+      const newTarget = parseInt(calorieTargetParam);
       if (!isNaN(newTarget)) {
         updateCalorieTarget(newTarget);
       }
     }
-  }, [params]); // Depend on params object
+  }, [refresh, calorieTargetParam]);
+  // -------------------------------------------------------------------------------
 
   // Add an interval refresh every minute to keep data current
   useEffect(() => {
