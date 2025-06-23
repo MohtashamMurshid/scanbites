@@ -41,8 +41,10 @@ const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOU
 const CLOUDINARY_UPLOAD_PRESET = "food_scan"; // Create this unsigned upload preset in your Cloudinary dashboard
 
 // OpenAI configuration
-const OPENAI_API_KEY =
-  "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";
+const OPENAI_API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY;
+
+// Log the API key to check if it's loaded correctly
+console.log("Using OpenAI API Key:", OPENAI_API_KEY ? "Loaded" : "Not Loaded");
 
 // Validate OpenAI API key
 if (!OPENAI_API_KEY) {
